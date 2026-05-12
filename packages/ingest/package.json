@@ -1,0 +1,32 @@
+{
+  "name": "@activist/ingest",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "migrate": "tsx src/migrate.ts",
+    "pull-edgar": "tsx src/pull-edgar.ts",
+    "pull-prices": "tsx src/pull-prices.ts",
+    "pull-ecd": "tsx src/pull-ecd.ts",
+    "pull-ixbrl": "tsx src/pull-ixbrl.ts",
+    "pull-universe": "tsx src/pull-universe.ts",
+    "pull-form4": "tsx src/pull-form4.ts",
+    "pull-13d": "tsx src/pull-13d.ts",
+    "extract-proxy": "tsx src/extract-proxy.ts",
+    "screen": "tsx src/screen.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@activist/shared": "workspace:*",
+    "@neondatabase/serverless": "^0.10.4",
+    "dotenv": "^16.4.7",
+    "fast-xml-parser": "^4.5.0",
+    "node-html-parser": "^7.0.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "@types/node": "^22.10.2"
+  }
+}

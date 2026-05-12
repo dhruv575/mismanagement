@@ -1,0 +1,32 @@
+node_modules/
+dist/
+.turbo/
+*.log
+*.tsbuildinfo
+
+# Secrets — every flavor stays local. .env.example IS committed as a template.
+.env
+.env.*
+!.env.example
+
+# Vercel CLI link state — created locally by `vercel link`. Not portable.
+.vercel/
+
+# Editor / OS detritus
+.DS_Store
+.idea/
+.vscode/
+Thumbs.db
+
+# Claude Code session state (memory, schedules, locks) — user-local.
+.claude/
+
+# Local-only ingestion cache. The ingest scripts create this folder on
+# demand and write fetched EDGAR HTML/JSON + failure dumps here. The
+# deployed app reads only Neon, so none of this belongs in the repo.
+data/
+
+# Python prototypes -- artifacts of stage 1/2 design work, source kept under
+# scripts/ but byproducts are not tracked.
+__pycache__/
+*.pyc

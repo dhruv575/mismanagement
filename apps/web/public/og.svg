@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a0a0a"/>
+      <stop offset="1" stop-color="#16161a"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e9eaee"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <g transform="translate(80, 80)">
+    <circle cx="40" cy="40" r="36" fill="#FFD60A"/>
+    <circle cx="80" cy="40" r="36" fill="#E63946" fill-opacity="0.92"/>
+    <circle cx="120" cy="40" r="36" fill="#1D4ED8" fill-opacity="0.92"/>
+    <text x="180" y="51" font-family="Geist, ui-sans-serif, system-ui" font-size="34" font-weight="700" fill="url(#ink)" letter-spacing="-0.5">MTS Activist</text>
+  </g>
+
+  <text x="80" y="320" font-family="Instrument Serif, Georgia, serif" font-style="italic" font-size="116" fill="url(#ink)" letter-spacing="-2">Public-company governance,</text>
+  <text x="80" y="430" font-family="Instrument Serif, Georgia, serif" font-style="italic" font-size="116" fill="url(#ink)" letter-spacing="-2">in numbers.</text>
+
+  <g transform="translate(80, 510)" font-family="Geist Mono, ui-monospace, monospace" font-size="18" letter-spacing="2" font-weight="700">
+    <text x="0" y="0" fill="#FFD60A">EDGAR · DEF 14A</text>
+    <text x="260" y="0" fill="#6a99ff">FORM 4 · 13D</text>
+    <text x="500" y="0" fill="#ff8a8a">RUSSELL 3000</text>
+  </g>
+
+  <text x="80" y="585" font-family="Geist Mono, ui-monospace, monospace" font-size="22" fill="#9aa3b2" font-weight="500">activist.mts.now</text>
+  <text x="1120" y="585" text-anchor="end" font-family="Geist Mono, ui-monospace, monospace" font-size="22" fill="#9aa3b2" font-weight="500">@mtslive</text>
+</svg>
