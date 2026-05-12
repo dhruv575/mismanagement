@@ -968,16 +968,62 @@ code {
  * Nothing here forks into a "desktop layout" — it's the same
  * card, just bigger.
  * ──────────────────────────────────────────────────────── */
+/* .ch-wrap is a container so the card responds to its own width, not the
+   viewport. This is how the download flow gets the phone-card image: the
+   cloned card is rendered off-screen inside a 390px-wide .ch-wrap, and
+   the desktop @container query below stops applying. */
+.ch-wrap {
+  position: relative;
+  container-type: inline-size;
+  container-name: card;
+}
+.ch-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.ch-download {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 7px 12px;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.ch-download:hover {
+  color: var(--accent);
+  border-color: rgba(255, 214, 10, 0.4);
+  background: rgba(255, 214, 10, 0.06);
+}
+.ch-download:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
 .ch {
-  /* Break out of .company horizontal padding on mobile so the card sits
-     flush to the viewport like the share-card artboard. The .company
-     mobile override below adjusts the page padding to match. */
+  /* Phone-card spec padding (14×16). This is what the off-screen download
+     clone uses to inset content from the card edge. On the live page
+     `.company .ch` strips horizontal padding so the page-level gutters
+     from `.company` don't double up. */
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 14px 0 18px;
+  padding: 14px 16px 18px;
   font-family: var(--font-sans);
   color: var(--ink);
+}
+
+/* Live company page: .company already provides horizontal gutters, so
+   skip them on .ch (avoids 32px double-padding on mobile). The download
+   clone is rendered off-screen — no .company ancestor — and keeps the
+   spec's 16px gutters. */
+.company .ch {
+  padding-left: 0;
+  padding-right: 0;
 }
 
 /* 1 — brand bar */
@@ -1278,12 +1324,13 @@ code {
   .fact-card { padding: 14px 16px; }
 }
 
-/* ─── Desktop: same components, bigger. The mobile layout is the
-   spec; desktop just scales tokens. No structural changes. ─── */
-@media (min-width: 721px) {
+/* ─── Desktop: same components, bigger. The mobile layout is the spec;
+   desktop just scales tokens. No structural changes.
+   Driven by `card`-container width — see .ch-wrap above. ─── */
+@container card (min-width: 721px) {
   .ch {
     gap: 24px;
-    padding: 28px 0 40px;
+    padding: 28px 32px 40px;
     max-width: 1080px;
     margin: 0 auto;
   }

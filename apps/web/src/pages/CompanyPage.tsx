@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   fetchCompany, fetchPrices, fetchCompensation, fetchBoard,
@@ -199,6 +199,8 @@ function ScorecardHero({
 }) {
   const [rank, setRank] = useState<number | null>(null);
   const [universe, setUniverse] = useState<number | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const cardRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     fetchMismanagementRank(ticker)
@@ -218,8 +220,63 @@ function ScorecardHero({
     .toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
     .toUpperCase();
 
+  async function downloadCard() {
+    if (!cardRef.current) return;
+    setDownloading(true);
+    let offscreen: HTMLDivElement | null = null;
+    try {
+      // Clone the live card into an off-screen 390px-wide .ch-wrap so the
+      // card's container query falls back to the phone layout (the @container
+      // (min-width: 721px) rules stop applying when the container is narrow).
+      // We use a clone — not a width transform on the live element — because
+      // mutating the visible card would flash the layout for the user.
+      const clone = cardRef.current.cloneNode(true) as HTMLElement;
+      offscreen = document.createElement("div");
+      offscreen.className = "ch-wrap";
+      offscreen.style.cssText =
+        "position: fixed; top: -10000px; left: -10000px; width: 390px; pointer-events: none;";
+      offscreen.appendChild(clone);
+      document.body.appendChild(offscreen);
+
+      // Wait two frames for the container-query reflow to settle, plus fonts
+      // (Geist / Instrument Serif from Google Fonts) so the captured PNG
+      // doesn't fall back to system fonts.
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      if (document.fonts?.ready) await document.fonts.ready;
+
+      const { toPng } = await import("html-to-image");
+      const dataUrl = await toPng(clone, {
+        pixelRatio: 2,
+        backgroundColor: "#0e0e10",
+        cacheBust: true,
+      });
+
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = `${ticker}-mismanagement.png`;
+      a.click();
+    } catch (e) {
+      console.error("download failed", e);
+    } finally {
+      if (offscreen?.parentNode) offscreen.parentNode.removeChild(offscreen);
+      setDownloading(false);
+    }
+  }
+
   return (
-    <article className="ch">
+    <div className="ch-wrap">
+      <div className="ch-actions">
+        <button
+          type="button"
+          className="ch-download"
+          onClick={downloadCard}
+          disabled={downloading || !checks}
+          aria-label="Download scorecard as PNG"
+        >
+          {downloading ? "Rendering…" : "↓ Download card"}
+        </button>
+      </div>
+      <article className="ch" ref={cardRef}>
       {/* 1 — brand bar */}
       <header className="ch-brand">
         <div className="ch-brand-left">
@@ -347,7 +404,8 @@ function ScorecardHero({
         <span>mts.report/mismanagement/{ticker.toLowerCase()}</span>
         <span>CIK {company.cik}</span>
       </footer>
-    </article>
+      </article>
+    </div>
   );
 }
 

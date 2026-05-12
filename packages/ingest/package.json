@@ -13,6 +13,7 @@
     "pull-form4": "tsx src/pull-form4.ts",
     "pull-13d": "tsx src/pull-13d.ts",
     "extract-proxy": "tsx src/extract-proxy.ts",
+    "refresh-mismanagement": "tsx src/refresh-mismanagement.ts",
     "screen": "tsx src/screen.ts",
     "typecheck": "tsc --noEmit"
   },

@@ -504,134 +504,28 @@ app.get("/mismanagement", async (c) => {
   const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 100), 1), 500);
   const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
 
-  // The query is split into CTEs that aggregate each input set once, then
-  // joined to companies. Single pass; no correlated subqueries.
+  // Reads from the materialized mismanagement_scores table — refreshed
+  // out-of-band by refresh-mismanagement.ts. Single-pass index scan, no
+  // CTE pipeline at request time.
   const sql = `
-    with pvp_clean as (
-      select cik, fiscal_year, company_tsr_indexed, peer_group_tsr_indexed,
-             case when abs(peo_total_comp) <= 1e9 then peo_total_comp end as peo_total_comp,
-             case when abs(peo_compensation_actually_paid) <= 1e9 then peo_compensation_actually_paid end as peo_cap
-      from xbrl_pay_vs_performance
-    ),
-    pvp_agg as (
-      select cik,
-             count(*) filter (
-               where company_tsr_indexed is not null
-                 and peer_group_tsr_indexed is not null
-                 and company_tsr_indexed < peer_group_tsr_indexed
-             )::int as years_under,
-             count(*) filter (
-               where company_tsr_indexed is not null
-                 and peer_group_tsr_indexed is not null
-             )::int as years_tracked,
-             percentile_cont(0.5) within group (order by peo_total_comp) as peo_median
-      from pvp_clean
-      group by cik
-    ),
-    pvp_latest as (
-      select distinct on (cik) cik, fiscal_year, company_tsr_indexed, peer_group_tsr_indexed
-      from pvp_clean
-      where company_tsr_indexed is not null and peer_group_tsr_indexed is not null
-      order by cik, fiscal_year desc
-    ),
-    -- Latest-year annual value per concept, per CIK
-    latest_annual as (
-      select distinct on (cik, concept) cik, concept, fiscal_year, value
-      from financial_metrics
-      where fiscal_year > 0
-        and concept in ('revenue','net_income','operating_cash_flow','capex','sbc','buybacks','dividends_paid')
-      order by cik, concept, fiscal_year desc
-    ),
-    fm as (
-      select cik,
-             max(value) filter (where concept = 'revenue') as revenue,
-             max(value) filter (where concept = 'net_income') as net_income,
-             max(value) filter (where concept = 'operating_cash_flow') as ocf,
-             max(value) filter (where concept = 'capex') as capex,
-             max(value) filter (where concept = 'sbc') as sbc,
-             max(value) filter (where concept = 'buybacks') as buybacks,
-             max(value) filter (where concept = 'dividends_paid') as dividends_paid
-      from latest_annual
-      group by cik
-    ),
-    -- Point-in-time balance-sheet
-    fm_pit as (
-      select cik,
-             max(value) filter (where concept = 'total_assets_latest') as total_assets,
-             max(value) filter (where concept = 'goodwill_latest') as goodwill
-      from financial_metrics
-      where fiscal_year = -1
-        and concept in ('total_assets_latest','goodwill_latest')
-      group by cik
-    ),
-    -- Net insider dollar flow over 12 months (P − S)
-    insider_net as (
-      select cik, sum(case
-                       when transaction_code = 'P' then transaction_value
-                       when transaction_code = 'S' then -transaction_value
-                       else 0
-                     end) as net_dollars
-      from insider_transactions
-      where transaction_date >= current_date - interval '365 days'
-      group by cik
-    ),
-    -- Active-intent 13D presence in last 18 months
-    active_13d as (
-      select cik, count(*)::int as n
-      from thirteen_d_filings
-      where is_active_intent = true
-        and filing_date >= current_date - interval '18 months'
-      group by cik
-    )
     select
       c.cik, c.ticker, c.name, c.sic_description,
       c.market_cap_at_universe_pull as market_cap,
-      pa.years_under, pa.years_tracked, pa.peo_median,
-      pl.company_tsr_indexed as latest_company_tsr,
-      pl.peer_group_tsr_indexed as latest_peer_tsr,
-      pl.fiscal_year as latest_pvp_year,
-      fm.revenue, fm.net_income, fm.ocf, fm.capex, fm.sbc,
-      fm.buybacks, fm.dividends_paid,
-      fm_pit.total_assets, fm_pit.goodwill,
-      coalesce(ind.net_dollars, 0)::float as insider_net_365d,
-      coalesce(a13.n, 0)::int as active_13d_count,
-      -- Flag computations
-      (pa.years_under >= 3) as flag_tsr_under,
-      (pa.years_under >= 3 and pa.peo_median is not null and pa.peo_median >= 15e6) as flag_pay_through_it,
-      (coalesce(a13.n, 0) > 0) as flag_active_13d,
-      (coalesce(ind.net_dollars, 0) <= -10e6) as flag_insider_selling,
-      (fm.ocf is not null and fm.net_income is not null and fm.net_income > 0
-        and fm.ocf < 0.80 * fm.net_income) as flag_earnings_cash,
-      (fm.revenue is not null and fm.revenue > 0 and fm.sbc is not null
-        and fm.sbc > 0.10 * fm.revenue) as flag_dilutive_sbc,
-      (fm.ocf is not null and fm.ocf > 0
-        and (coalesce(fm.buybacks, 0) + coalesce(fm.dividends_paid, 0)) > fm.ocf) as flag_returns_over_fcf,
-      (fm_pit.goodwill is not null and fm_pit.total_assets is not null
-        and fm_pit.total_assets > 0 and fm_pit.goodwill > 0.40 * fm_pit.total_assets) as flag_goodwill_heavy,
+      ms.years_under, ms.years_tracked, ms.peo_median,
+      ms.latest_company_tsr, ms.latest_peer_tsr, ms.latest_pvp_year,
+      ms.revenue, ms.net_income, ms.ocf, ms.capex, ms.sbc,
+      ms.buybacks, ms.dividends_paid,
+      ms.total_assets, ms.goodwill,
+      ms.insider_net_365d, ms.active_13d_count,
+      ms.flag_tsr_under, ms.flag_pay_through_it, ms.flag_active_13d,
+      ms.flag_insider_selling, ms.flag_earnings_cash, ms.flag_dilutive_sbc,
+      ms.flag_returns_over_fcf, ms.flag_goodwill_heavy,
       count(*) over() as total
-    from companies c
-    left join pvp_agg pa on pa.cik = c.cik
-    left join pvp_latest pl on pl.cik = c.cik
-    left join fm on fm.cik = c.cik
-    left join fm_pit on fm_pit.cik = c.cik
-    left join insider_net ind on ind.cik = c.cik
-    left join active_13d a13 on a13.cik = c.cik
+    from mismanagement_scores ms
+    join companies c on c.cik = ms.cik
     where c.is_russell_3000
       and (c.market_cap_at_universe_pull is null or c.market_cap_at_universe_pull >= $1::float8)
-    order by (
-      (case when pa.years_under >= 3 then 1 else 0 end)
-      + (case when pa.years_under >= 3 and pa.peo_median is not null and pa.peo_median >= 15e6 then 1 else 0 end)
-      + (case when coalesce(a13.n, 0) > 0 then 1 else 0 end)
-      + (case when coalesce(ind.net_dollars, 0) <= -10e6 then 1 else 0 end)
-      + (case when fm.ocf is not null and fm.net_income is not null and fm.net_income > 0 and fm.ocf < 0.80 * fm.net_income then 1 else 0 end)
-      + (case when fm.revenue is not null and fm.revenue > 0 and fm.sbc is not null and fm.sbc > 0.10 * fm.revenue then 1 else 0 end)
-      + (case when fm.ocf is not null and fm.ocf > 0 and (coalesce(fm.buybacks, 0) + coalesce(fm.dividends_paid, 0)) > fm.ocf then 1 else 0 end)
-      + (case when fm_pit.goodwill is not null and fm_pit.total_assets is not null and fm_pit.total_assets > 0 and fm_pit.goodwill > 0.40 * fm_pit.total_assets then 1 else 0 end)
-    ) desc,
-    -- Tiebreak: cumulative TSR gap (peer - co) × median PEO comp, both
-    -- nudging the strongest combined signal upward.
-    (coalesce(pl.peer_group_tsr_indexed, 0) - coalesce(pl.company_tsr_indexed, 0)) * coalesce(pa.peo_median, 0) desc,
-    c.ticker asc
+    order by ms.flags_fired desc, ms.tiebreak desc, c.ticker asc
     limit $2 offset $3
   `;
 
@@ -659,220 +553,43 @@ app.get("/mismanagement", async (c) => {
   });
 });
 
-// Per-company mismanagement scorecard — same eight flags, one row.
+// Per-company mismanagement scorecard. Single-row read from the
+// materialized mismanagement_scores table.
 app.get("/companies/:ticker/mismanagement", async (c) => {
   const ticker = c.req.param("ticker").toUpperCase();
-  const r = await pool().query<{ cik: string }>(
-    `select cik from companies where ticker = $1 limit 1`,
+  const out = await pool().query(
+    `select
+       ms.years_under, ms.years_tracked, ms.peo_median,
+       ms.latest_company_tsr, ms.latest_peer_tsr, ms.latest_pvp_year,
+       ms.revenue, ms.net_income, ms.ocf, ms.capex, ms.sbc,
+       ms.buybacks, ms.dividends_paid,
+       ms.total_assets, ms.goodwill,
+       ms.insider_net_365d, ms.active_13d_count,
+       ms.flag_tsr_under, ms.flag_pay_through_it, ms.flag_active_13d,
+       ms.flag_insider_selling, ms.flag_earnings_cash, ms.flag_dilutive_sbc,
+       ms.flag_returns_over_fcf, ms.flag_goodwill_heavy
+     from companies c
+     join mismanagement_scores ms on ms.cik = c.cik
+     where c.ticker = $1
+     limit 1`,
     [ticker],
   );
-  if (r.rows.length === 0) return c.json({ error: "not found" }, 404);
-  const cik = r.rows[0]!.cik;
-  // Run the same big query but pre-filter by cik in the FROM clause so it
-  // touches one row of every CTE only. The order/limit/offset are still
-  // valid (one row).
-  const sql = `
-    with pvp_clean as (
-      select fiscal_year, company_tsr_indexed, peer_group_tsr_indexed,
-             case when abs(peo_total_comp) <= 1e9 then peo_total_comp end as peo_total_comp
-      from xbrl_pay_vs_performance
-      where cik = $1
-    ),
-    pvp_agg as (
-      select
-        count(*) filter (
-          where company_tsr_indexed is not null
-            and peer_group_tsr_indexed is not null
-            and company_tsr_indexed < peer_group_tsr_indexed
-        )::int as years_under,
-        count(*) filter (
-          where company_tsr_indexed is not null
-            and peer_group_tsr_indexed is not null
-        )::int as years_tracked,
-        percentile_cont(0.5) within group (order by peo_total_comp) as peo_median
-      from pvp_clean
-    ),
-    pvp_latest as (
-      select fiscal_year, company_tsr_indexed, peer_group_tsr_indexed
-      from pvp_clean
-      where company_tsr_indexed is not null and peer_group_tsr_indexed is not null
-      order by fiscal_year desc
-      limit 1
-    ),
-    latest_annual as (
-      select distinct on (concept) concept, fiscal_year, value
-      from financial_metrics
-      where cik = $1 and fiscal_year > 0
-        and concept in ('revenue','net_income','operating_cash_flow','capex','sbc','buybacks','dividends_paid')
-      order by concept, fiscal_year desc
-    ),
-    fm as (
-      select
-        max(value) filter (where concept = 'revenue') as revenue,
-        max(value) filter (where concept = 'net_income') as net_income,
-        max(value) filter (where concept = 'operating_cash_flow') as ocf,
-        max(value) filter (where concept = 'capex') as capex,
-        max(value) filter (where concept = 'sbc') as sbc,
-        max(value) filter (where concept = 'buybacks') as buybacks,
-        max(value) filter (where concept = 'dividends_paid') as dividends_paid
-      from latest_annual
-    ),
-    fm_pit as (
-      select
-        max(value) filter (where concept = 'total_assets_latest') as total_assets,
-        max(value) filter (where concept = 'goodwill_latest') as goodwill
-      from financial_metrics
-      where cik = $1 and fiscal_year = -1
-        and concept in ('total_assets_latest','goodwill_latest')
-    ),
-    insider_net as (
-      select coalesce(sum(case
-                       when transaction_code = 'P' then transaction_value
-                       when transaction_code = 'S' then -transaction_value
-                       else 0
-                     end), 0) as net_dollars
-      from insider_transactions
-      where cik = $1 and transaction_date >= current_date - interval '365 days'
-    ),
-    active_13d as (
-      select count(*)::int as n
-      from thirteen_d_filings
-      where cik = $1 and is_active_intent = true
-        and filing_date >= current_date - interval '18 months'
-    )
-    select
-      pa.years_under, pa.years_tracked, pa.peo_median,
-      pl.company_tsr_indexed as latest_company_tsr,
-      pl.peer_group_tsr_indexed as latest_peer_tsr,
-      pl.fiscal_year as latest_pvp_year,
-      fm.revenue, fm.net_income, fm.ocf, fm.capex, fm.sbc,
-      fm.buybacks, fm.dividends_paid,
-      fm_pit.total_assets, fm_pit.goodwill,
-      ind.net_dollars::float as insider_net_365d,
-      a13.n::int as active_13d_count,
-      (pa.years_under >= 3) as flag_tsr_under,
-      (pa.years_under >= 3 and pa.peo_median is not null and pa.peo_median >= 15e6) as flag_pay_through_it,
-      (a13.n > 0) as flag_active_13d,
-      (ind.net_dollars <= -10e6) as flag_insider_selling,
-      (fm.ocf is not null and fm.net_income is not null and fm.net_income > 0
-        and fm.ocf < 0.80 * fm.net_income) as flag_earnings_cash,
-      (fm.revenue is not null and fm.revenue > 0 and fm.sbc is not null
-        and fm.sbc > 0.10 * fm.revenue) as flag_dilutive_sbc,
-      (fm.ocf is not null and fm.ocf > 0
-        and (coalesce(fm.buybacks, 0) + coalesce(fm.dividends_paid, 0)) > fm.ocf) as flag_returns_over_fcf,
-      (fm_pit.goodwill is not null and fm_pit.total_assets is not null
-        and fm_pit.total_assets > 0 and fm_pit.goodwill > 0.40 * fm_pit.total_assets) as flag_goodwill_heavy
-    from pvp_agg pa, fm, fm_pit, insider_net ind, active_13d a13
-    left join pvp_latest pl on true
-  `;
-  const out = await pool().query(sql, [cik]);
   c.header("Cache-Control", STABLE_CACHE);
   return c.json({ flags: MISMANAGEMENT_FLAGS, row: out.rows[0] ?? null });
 });
 
-// ─────────────────────────────────────────────────────────────────────────
-// /mismanagement/rank/:ticker
-//
-// Replaces the wasteful pattern of fetching /mismanagement?limit=5000 just
-// to look up a ticker's position. Returns { rank, total } as ints. The
-// CTEs still scan all rows (rank is a global ordering), but the payload
-// is bytes instead of megabytes and the response is CDN-cacheable.
-// ─────────────────────────────────────────────────────────────────────────
+// /mismanagement/rank/:ticker — read from the materialized scoreboard.
+// row_number() over the index-ordered set; one filter to find the ticker.
 app.get("/mismanagement/rank/:ticker", async (c) => {
   const ticker = c.req.param("ticker").toUpperCase();
   const sql = `
-    with pvp_clean as (
-      select cik, fiscal_year, company_tsr_indexed, peer_group_tsr_indexed,
-             case when abs(peo_total_comp) <= 1e9 then peo_total_comp end as peo_total_comp
-      from xbrl_pay_vs_performance
-    ),
-    pvp_agg as (
-      select cik,
-             count(*) filter (
-               where company_tsr_indexed is not null
-                 and peer_group_tsr_indexed is not null
-                 and company_tsr_indexed < peer_group_tsr_indexed
-             )::int as years_under,
-             percentile_cont(0.5) within group (order by peo_total_comp) as peo_median
-      from pvp_clean
-      group by cik
-    ),
-    pvp_latest as (
-      select distinct on (cik) cik, company_tsr_indexed, peer_group_tsr_indexed
-      from pvp_clean
-      where company_tsr_indexed is not null and peer_group_tsr_indexed is not null
-      order by cik, fiscal_year desc
-    ),
-    latest_annual as (
-      select distinct on (cik, concept) cik, concept, value
-      from financial_metrics
-      where fiscal_year > 0
-        and concept in ('revenue','net_income','operating_cash_flow','sbc','buybacks','dividends_paid')
-      order by cik, concept, fiscal_year desc
-    ),
-    fm as (
-      select cik,
-             max(value) filter (where concept = 'revenue') as revenue,
-             max(value) filter (where concept = 'net_income') as net_income,
-             max(value) filter (where concept = 'operating_cash_flow') as ocf,
-             max(value) filter (where concept = 'sbc') as sbc,
-             max(value) filter (where concept = 'buybacks') as buybacks,
-             max(value) filter (where concept = 'dividends_paid') as dividends_paid
-      from latest_annual
-      group by cik
-    ),
-    fm_pit as (
-      select cik,
-             max(value) filter (where concept = 'total_assets_latest') as total_assets,
-             max(value) filter (where concept = 'goodwill_latest') as goodwill
-      from financial_metrics
-      where fiscal_year = -1 and concept in ('total_assets_latest','goodwill_latest')
-      group by cik
-    ),
-    insider_net as (
-      select cik, sum(case
-                       when transaction_code = 'P' then transaction_value
-                       when transaction_code = 'S' then -transaction_value
-                       else 0
-                     end) as net_dollars
-      from insider_transactions
-      where transaction_date >= current_date - interval '365 days'
-      group by cik
-    ),
-    active_13d as (
-      select cik, count(*)::int as n
-      from thirteen_d_filings
-      where is_active_intent = true
-        and filing_date >= current_date - interval '18 months'
-      group by cik
-    ),
-    flag_counts as (
-      select c.cik, c.ticker,
-        (
-          (case when pa.years_under >= 3 then 1 else 0 end)
-          + (case when pa.years_under >= 3 and pa.peo_median is not null and pa.peo_median >= 15e6 then 1 else 0 end)
-          + (case when coalesce(a13.n, 0) > 0 then 1 else 0 end)
-          + (case when coalesce(ind.net_dollars, 0) <= -10e6 then 1 else 0 end)
-          + (case when fm.ocf is not null and fm.net_income is not null and fm.net_income > 0 and fm.ocf < 0.80 * fm.net_income then 1 else 0 end)
-          + (case when fm.revenue is not null and fm.revenue > 0 and fm.sbc is not null and fm.sbc > 0.10 * fm.revenue then 1 else 0 end)
-          + (case when fm.ocf is not null and fm.ocf > 0 and (coalesce(fm.buybacks, 0) + coalesce(fm.dividends_paid, 0)) > fm.ocf then 1 else 0 end)
-          + (case when fm_pit.goodwill is not null and fm_pit.total_assets is not null and fm_pit.total_assets > 0 and fm_pit.goodwill > 0.40 * fm_pit.total_assets then 1 else 0 end)
-        ) as flags_fired,
-        (coalesce(pl.peer_group_tsr_indexed, 0) - coalesce(pl.company_tsr_indexed, 0)) * coalesce(pa.peo_median, 0) as tiebreak
-      from companies c
-      left join pvp_agg pa on pa.cik = c.cik
-      left join pvp_latest pl on pl.cik = c.cik
-      left join fm on fm.cik = c.cik
-      left join fm_pit on fm_pit.cik = c.cik
-      left join insider_net ind on ind.cik = c.cik
-      left join active_13d a13 on a13.cik = c.cik
-      where c.is_russell_3000
-    ),
-    ranked as (
-      select cik, ticker,
-             row_number() over (order by flags_fired desc, tiebreak desc, ticker asc) as rank,
+    with ranked as (
+      select c.ticker,
+             row_number() over (order by ms.flags_fired desc, ms.tiebreak desc, c.ticker asc) as rank,
              count(*) over () as total
-      from flag_counts
+      from mismanagement_scores ms
+      join companies c on c.cik = ms.cik
+      where c.is_russell_3000
     )
     select rank::int as rank, total::int as total
     from ranked where ticker = $1
@@ -1204,54 +921,71 @@ app.get("/companies/:ticker/peers", async (c) => {
     ? (r.rows[0]!.raw_json.peer_group as string[]).map((s) => String(s))
     : [];
 
-  // Resolve each peer string to a CIK
-  const resolved: Array<{ cik: string; ticker: string; name: string; matched_as: string }> = [];
-  const unresolved: string[] = [];
-
-  for (const peer of peerStrs) {
+  // Resolve every peer string in ONE round-trip instead of the N+1 it
+  // used to be. We pre-compute the three candidate keys (ticker hint,
+  // normalized name, name prefix) for each peer string, then ask the
+  // database for any company matching any of those keys. Local code
+  // matches each peer back to a row, preferring ticker > normalized >
+  // prefix in that order.
+  interface PeerHints {
+    original: string;
+    tickerHint: string | null;
+    normalized: string;
+    prefix: string;
+  }
+  const hints: PeerHints[] = peerStrs.map((peer) => {
     const tickMatch = peer.match(/\(([A-Z][A-Z0-9.\-]{0,6})\)/);
-    if (tickMatch) {
-      const t = tickMatch[1]!;
-      const tr = await pool().query<{ cik: string; ticker: string; name: string }>(
-        `select cik, ticker, name from companies where ticker = $1`,
-        [t],
-      );
-      if (tr.rows[0]) {
-        resolved.push({ ...tr.rows[0], matched_as: peer });
-        continue;
-      }
-    }
     const normalized = peer
       .replace(/\([^)]*\)/g, "")
       .replace(/[^a-z0-9 ]/gi, "")
       .replace(/\s+/g, " ")
       .trim()
       .toLowerCase();
-    if (!normalized) {
-      unresolved.push(peer);
-      continue;
-    }
-    const nr = await pool().query<{ cik: string; ticker: string; name: string }>(
-      `select cik, ticker, name from companies
-       where lower(regexp_replace(name, '[^a-zA-Z0-9 ]', '', 'g')) = $1
-       limit 1`,
-      [normalized],
+    const prefix = normalized.split(" ").slice(0, 2).join(" ");
+    return { original: peer, tickerHint: tickMatch?.[1] ?? null, normalized, prefix };
+  });
+
+  const tickerKeys = Array.from(new Set(hints.map((h) => h.tickerHint).filter((s): s is string => !!s)));
+  const normKeys = Array.from(new Set(hints.map((h) => h.normalized).filter((s) => s.length > 0)));
+  const prefixKeys = Array.from(new Set(hints.map((h) => h.prefix).filter((s) => s.length > 0))).map((p) => p + "%");
+
+  type Candidate = { cik: string; ticker: string; name: string; norm: string };
+  let candidates: { rows: Candidate[] } = { rows: [] };
+  if (tickerKeys.length || normKeys.length || prefixKeys.length) {
+    candidates = await pool().query<Candidate>(
+      `select cik, ticker, name,
+              lower(regexp_replace(name, '[^a-zA-Z0-9 ]', '', 'g')) as norm
+       from companies
+       where ticker = any($1::text[])
+          or lower(regexp_replace(name, '[^a-zA-Z0-9 ]', '', 'g')) = any($2::text[])
+          or lower(name) ilike any($3::text[])`,
+      [tickerKeys, normKeys, prefixKeys],
     );
-    if (nr.rows[0]) {
-      resolved.push({ ...nr.rows[0], matched_as: peer });
-      continue;
+  }
+
+  // Build lookup maps.
+  const byTicker = new Map<string, Candidate>();
+  const byNorm = new Map<string, Candidate>();
+  const byPrefix: Candidate[] = candidates.rows;
+  for (const row of candidates.rows) {
+    if (!byTicker.has(row.ticker)) byTicker.set(row.ticker, row);
+    if (!byNorm.has(row.norm)) byNorm.set(row.norm, row);
+  }
+
+  const resolved: Array<{ cik: string; ticker: string; name: string; matched_as: string }> = [];
+  const unresolved: string[] = [];
+  const seenCik = new Set<string>();
+  for (const h of hints) {
+    let hit: Candidate | undefined;
+    if (h.tickerHint) hit = byTicker.get(h.tickerHint);
+    if (!hit && h.normalized) hit = byNorm.get(h.normalized);
+    if (!hit && h.prefix) hit = byPrefix.find((c) => c.name.toLowerCase().startsWith(h.prefix));
+    if (hit && !seenCik.has(hit.cik)) {
+      seenCik.add(hit.cik);
+      resolved.push({ cik: hit.cik, ticker: hit.ticker, name: hit.name, matched_as: h.original });
+    } else if (!hit) {
+      unresolved.push(h.original);
     }
-    // Last try: ILIKE prefix on first few words
-    const firstTwoWords = normalized.split(" ").slice(0, 2).join(" ");
-    const pr = await pool().query<{ cik: string; ticker: string; name: string }>(
-      `select cik, ticker, name from companies where lower(name) ilike $1 || '%' limit 1`,
-      [firstTwoWords],
-    );
-    if (pr.rows[0]) {
-      resolved.push({ ...pr.rows[0], matched_as: peer });
-      continue;
-    }
-    unresolved.push(peer);
   }
 
   // For the subject + each resolved peer, gather comparable metrics.

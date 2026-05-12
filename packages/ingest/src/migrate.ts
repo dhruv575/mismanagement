@@ -329,6 +329,50 @@ const statements = [
   // help that scan. A standalone date index does.
   `create index if not exists insider_tx_date_idx on insider_transactions (transaction_date desc)`,
   `create index if not exists thirteen_d_date_idx on thirteen_d_filings (filing_date desc) where is_active_intent`,
+
+  // ── Mismanagement scoreboard, materialized. ──────────────────────────
+  // Re-deriving the eight flags (and their evidence values) from raw
+  // tables on every request blew past the Vercel Edge timeout — the
+  // pipeline scans hundreds of thousands of rows even with the indexes
+  // above. This table holds one row per CIK with everything the
+  // /mismanagement endpoints need. The refresh-mismanagement script
+  // recomputes it (TRUNCATE + INSERT) on demand; the table is otherwise
+  // append-only from the API's perspective.
+  `create table if not exists mismanagement_scores (
+    cik text primary key references companies(cik) on delete cascade,
+    years_under int,
+    years_tracked int,
+    peo_median double precision,
+    latest_company_tsr double precision,
+    latest_peer_tsr double precision,
+    latest_pvp_year smallint,
+    revenue double precision,
+    net_income double precision,
+    ocf double precision,
+    capex double precision,
+    sbc double precision,
+    buybacks double precision,
+    dividends_paid double precision,
+    total_assets double precision,
+    goodwill double precision,
+    insider_net_365d double precision not null default 0,
+    active_13d_count int not null default 0,
+    flag_tsr_under boolean not null default false,
+    flag_pay_through_it boolean not null default false,
+    flag_active_13d boolean not null default false,
+    flag_insider_selling boolean not null default false,
+    flag_earnings_cash boolean not null default false,
+    flag_dilutive_sbc boolean not null default false,
+    flag_returns_over_fcf boolean not null default false,
+    flag_goodwill_heavy boolean not null default false,
+    flags_fired int not null default 0,
+    tiebreak double precision not null default 0,
+    refreshed_at timestamptz not null default now()
+  )`,
+  // The endpoint ordering is (flags_fired desc, tiebreak desc, ticker asc).
+  // Index covers the first two columns; ticker is read from the join.
+  `create index if not exists mismanagement_scores_rank_idx
+     on mismanagement_scores (flags_fired desc, tiebreak desc)`,
 ];
 
 for (const stmt of statements) {
