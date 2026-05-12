@@ -130,68 +130,71 @@ app.get("/companies/:ticker/proxy", async (c) => {
 app.get("/companies/:ticker/comp", async (c) => {
   const ticker = c.req.param("ticker").toUpperCase();
 
-  const ext = await pool().query<{
-    id: number; extracted_at: string; model: string; fiscal_year_covered: number;
-  }>(
-    `select pe.id, pe.extracted_at::text, pe.model, pe.fiscal_year_covered
-     from proxy_extractions pe
-     join companies cmp on cmp.cik = pe.cik
-     where cmp.ticker = $1
-     order by pe.fiscal_year_covered desc, pe.extracted_at desc
-     limit 1`,
-    [ticker],
-  );
+  // ext + xbrl don't depend on each other — run in parallel.
+  const [ext, xbrl] = await Promise.all([
+    pool().query<{
+      id: number; extracted_at: string; model: string; fiscal_year_covered: number;
+    }>(
+      `select pe.id, pe.extracted_at::text, pe.model, pe.fiscal_year_covered
+       from proxy_extractions pe
+       join companies cmp on cmp.cik = pe.cik
+       where cmp.ticker = $1
+       order by pe.fiscal_year_covered desc, pe.extracted_at desc
+       limit 1`,
+      [ticker],
+    ),
+    pool().query<{
+      fiscal_year: number;
+      peo_total_comp: number | null;
+      peo_compensation_actually_paid: number | null;
+      non_peo_neo_avg_total_comp: number | null;
+      non_peo_neo_avg_compensation_actually_paid: number | null;
+      company_tsr_indexed: number | null;
+      peer_group_tsr_indexed: number | null;
+      gaap_net_income: number | null;
+    }>(
+      `select x.fiscal_year, x.peo_total_comp, x.peo_compensation_actually_paid,
+              x.non_peo_neo_avg_total_comp, x.non_peo_neo_avg_compensation_actually_paid,
+              x.company_tsr_indexed, x.peer_group_tsr_indexed, x.gaap_net_income
+       from xbrl_pay_vs_performance x
+       join companies cmp on cmp.cik = x.cik
+       where cmp.ticker = $1
+       order by x.fiscal_year desc`,
+      [ticker],
+    ),
+  ]);
   const extraction = ext.rows[0] ?? null;
 
-  const comp = extraction
-    ? await pool().query(
-        `select name, title, fiscal_year, salary, bonus, stock_awards,
-                option_awards, non_equity_incentive, change_in_pension,
-                all_other_compensation, total
-         from summary_compensation
-         where extraction_id = $1
-         order by fiscal_year desc, total desc nulls last, name`,
-        [extraction.id],
-      )
-    : { rows: [] as never[] };
-
-  const xbrl = await pool().query<{
-    fiscal_year: number;
-    peo_total_comp: number | null;
-    peo_compensation_actually_paid: number | null;
-    non_peo_neo_avg_total_comp: number | null;
-    non_peo_neo_avg_compensation_actually_paid: number | null;
-    company_tsr_indexed: number | null;
-    peer_group_tsr_indexed: number | null;
-    gaap_net_income: number | null;
-  }>(
-    `select x.fiscal_year, x.peo_total_comp, x.peo_compensation_actually_paid,
-            x.non_peo_neo_avg_total_comp, x.non_peo_neo_avg_compensation_actually_paid,
-            x.company_tsr_indexed, x.peer_group_tsr_indexed, x.gaap_net_income
-     from xbrl_pay_vs_performance x
-     join companies cmp on cmp.cik = x.cik
-     where cmp.ticker = $1
-     order by x.fiscal_year desc`,
-    [ticker],
-  );
-
-  const pvpFallback = extraction
-    ? await pool().query<{
-        year: number;
-        ceo_compensation_actually_paid: number | null;
-        average_neo_compensation_actually_paid: number | null;
-        company_tsr_indexed: number | null;
-        peer_group_tsr_indexed: number | null;
-        gaap_net_income: number | null;
-      }>(
-        `select year, ceo_compensation_actually_paid, average_neo_compensation_actually_paid,
-                company_tsr_indexed, peer_group_tsr_indexed, gaap_net_income
-         from pay_vs_performance
-         where extraction_id = $1
-         order by year desc`,
-        [extraction.id],
-      )
-    : { rows: [] as never[] };
+  // The two extraction-scoped queries can also fan out in parallel once
+  // we know the extraction id.
+  const [comp, pvpFallback] = extraction
+    ? await Promise.all([
+        pool().query(
+          `select name, title, fiscal_year, salary, bonus, stock_awards,
+                  option_awards, non_equity_incentive, change_in_pension,
+                  all_other_compensation, total
+           from summary_compensation
+           where extraction_id = $1
+           order by fiscal_year desc, total desc nulls last, name`,
+          [extraction.id],
+        ),
+        pool().query<{
+          year: number;
+          ceo_compensation_actually_paid: number | null;
+          average_neo_compensation_actually_paid: number | null;
+          company_tsr_indexed: number | null;
+          peer_group_tsr_indexed: number | null;
+          gaap_net_income: number | null;
+        }>(
+          `select year, ceo_compensation_actually_paid, average_neo_compensation_actually_paid,
+                  company_tsr_indexed, peer_group_tsr_indexed, gaap_net_income
+           from pay_vs_performance
+           where extraction_id = $1
+           order by year desc`,
+          [extraction.id],
+        ),
+      ])
+    : [{ rows: [] as never[] }, { rows: [] as never[] }];
 
   // Merge: prefer xbrl row, fallback to proxy row per fiscal_year.
   type PvP = {
@@ -259,38 +262,39 @@ app.get("/companies/:ticker/board", async (c) => {
   }
   const extraction = ext.rows[0]!;
 
-  const directors = await pool().query(
-    `select d.name, d.age, d.director_since_year, d.independent, d.is_chair,
-            d.is_lead_independent_director, d.committees, d.other_public_boards,
-            d.attendance_below_75pct,
-            dc.total as total_compensation
-     from directors d
-     left join director_compensation dc on dc.extraction_id = d.extraction_id and dc.name = d.name
-     where d.extraction_id = $1
-     order by d.is_chair desc nulls last,
-              d.is_lead_independent_director desc nulls last,
-              d.name`,
-    [extraction.id],
-  );
-
-  const ownership = await pool().query(
-    `select name, holder_type, shares, percent_class
-     from equity_ownership
-     where extraction_id = $1
-     order by percent_class desc nulls last, shares desc nulls last`,
-    [extraction.id],
-  );
-
-  // Related-party transactions: Item 13 disclosures. Editorially material for
-  // conflicts-of-interest stories (director consulting fees, family-owned
-  // suppliers, controlling-shareholder real-estate, etc.).
-  const relatedParty = await pool().query(
-    `select description, parties, amount_or_terms
-     from related_party_transactions
-     where extraction_id = $1
-     order by description`,
-    [extraction.id],
-  );
+  // All three extraction-scoped reads run in parallel.
+  const [directors, ownership, relatedParty] = await Promise.all([
+    pool().query(
+      `select d.name, d.age, d.director_since_year, d.independent, d.is_chair,
+              d.is_lead_independent_director, d.committees, d.other_public_boards,
+              d.attendance_below_75pct,
+              dc.total as total_compensation
+       from directors d
+       left join director_compensation dc on dc.extraction_id = d.extraction_id and dc.name = d.name
+       where d.extraction_id = $1
+       order by d.is_chair desc nulls last,
+                d.is_lead_independent_director desc nulls last,
+                d.name`,
+      [extraction.id],
+    ),
+    pool().query(
+      `select name, holder_type, shares, percent_class
+       from equity_ownership
+       where extraction_id = $1
+       order by percent_class desc nulls last, shares desc nulls last`,
+      [extraction.id],
+    ),
+    // Related-party transactions: Item 13 disclosures. Editorially material
+    // for conflicts-of-interest stories (director consulting fees, family-
+    // owned suppliers, controlling-shareholder real-estate, etc.).
+    pool().query(
+      `select description, parties, amount_or_terms
+       from related_party_transactions
+       where extraction_id = $1
+       order by description`,
+      [extraction.id],
+    ),
+  ]);
 
   c.header("Cache-Control", STABLE_CACHE);
   return c.json({
@@ -767,6 +771,118 @@ app.get("/companies/:ticker/mismanagement", async (c) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
+// /mismanagement/rank/:ticker
+//
+// Replaces the wasteful pattern of fetching /mismanagement?limit=5000 just
+// to look up a ticker's position. Returns { rank, total } as ints. The
+// CTEs still scan all rows (rank is a global ordering), but the payload
+// is bytes instead of megabytes and the response is CDN-cacheable.
+// ─────────────────────────────────────────────────────────────────────────
+app.get("/mismanagement/rank/:ticker", async (c) => {
+  const ticker = c.req.param("ticker").toUpperCase();
+  const sql = `
+    with pvp_clean as (
+      select cik, fiscal_year, company_tsr_indexed, peer_group_tsr_indexed,
+             case when abs(peo_total_comp) <= 1e9 then peo_total_comp end as peo_total_comp
+      from xbrl_pay_vs_performance
+    ),
+    pvp_agg as (
+      select cik,
+             count(*) filter (
+               where company_tsr_indexed is not null
+                 and peer_group_tsr_indexed is not null
+                 and company_tsr_indexed < peer_group_tsr_indexed
+             )::int as years_under,
+             percentile_cont(0.5) within group (order by peo_total_comp) as peo_median
+      from pvp_clean
+      group by cik
+    ),
+    pvp_latest as (
+      select distinct on (cik) cik, company_tsr_indexed, peer_group_tsr_indexed
+      from pvp_clean
+      where company_tsr_indexed is not null and peer_group_tsr_indexed is not null
+      order by cik, fiscal_year desc
+    ),
+    latest_annual as (
+      select distinct on (cik, concept) cik, concept, value
+      from financial_metrics
+      where fiscal_year > 0
+        and concept in ('revenue','net_income','operating_cash_flow','sbc','buybacks','dividends_paid')
+      order by cik, concept, fiscal_year desc
+    ),
+    fm as (
+      select cik,
+             max(value) filter (where concept = 'revenue') as revenue,
+             max(value) filter (where concept = 'net_income') as net_income,
+             max(value) filter (where concept = 'operating_cash_flow') as ocf,
+             max(value) filter (where concept = 'sbc') as sbc,
+             max(value) filter (where concept = 'buybacks') as buybacks,
+             max(value) filter (where concept = 'dividends_paid') as dividends_paid
+      from latest_annual
+      group by cik
+    ),
+    fm_pit as (
+      select cik,
+             max(value) filter (where concept = 'total_assets_latest') as total_assets,
+             max(value) filter (where concept = 'goodwill_latest') as goodwill
+      from financial_metrics
+      where fiscal_year = -1 and concept in ('total_assets_latest','goodwill_latest')
+      group by cik
+    ),
+    insider_net as (
+      select cik, sum(case
+                       when transaction_code = 'P' then transaction_value
+                       when transaction_code = 'S' then -transaction_value
+                       else 0
+                     end) as net_dollars
+      from insider_transactions
+      where transaction_date >= current_date - interval '365 days'
+      group by cik
+    ),
+    active_13d as (
+      select cik, count(*)::int as n
+      from thirteen_d_filings
+      where is_active_intent = true
+        and filing_date >= current_date - interval '18 months'
+      group by cik
+    ),
+    flag_counts as (
+      select c.cik, c.ticker,
+        (
+          (case when pa.years_under >= 3 then 1 else 0 end)
+          + (case when pa.years_under >= 3 and pa.peo_median is not null and pa.peo_median >= 15e6 then 1 else 0 end)
+          + (case when coalesce(a13.n, 0) > 0 then 1 else 0 end)
+          + (case when coalesce(ind.net_dollars, 0) <= -10e6 then 1 else 0 end)
+          + (case when fm.ocf is not null and fm.net_income is not null and fm.net_income > 0 and fm.ocf < 0.80 * fm.net_income then 1 else 0 end)
+          + (case when fm.revenue is not null and fm.revenue > 0 and fm.sbc is not null and fm.sbc > 0.10 * fm.revenue then 1 else 0 end)
+          + (case when fm.ocf is not null and fm.ocf > 0 and (coalesce(fm.buybacks, 0) + coalesce(fm.dividends_paid, 0)) > fm.ocf then 1 else 0 end)
+          + (case when fm_pit.goodwill is not null and fm_pit.total_assets is not null and fm_pit.total_assets > 0 and fm_pit.goodwill > 0.40 * fm_pit.total_assets then 1 else 0 end)
+        ) as flags_fired,
+        (coalesce(pl.peer_group_tsr_indexed, 0) - coalesce(pl.company_tsr_indexed, 0)) * coalesce(pa.peo_median, 0) as tiebreak
+      from companies c
+      left join pvp_agg pa on pa.cik = c.cik
+      left join pvp_latest pl on pl.cik = c.cik
+      left join fm on fm.cik = c.cik
+      left join fm_pit on fm_pit.cik = c.cik
+      left join insider_net ind on ind.cik = c.cik
+      left join active_13d a13 on a13.cik = c.cik
+      where c.is_russell_3000
+    ),
+    ranked as (
+      select cik, ticker,
+             row_number() over (order by flags_fired desc, tiebreak desc, ticker asc) as rank,
+             count(*) over () as total
+      from flag_counts
+    )
+    select rank::int as rank, total::int as total
+    from ranked where ticker = $1
+  `;
+  const out = await pool().query<{ rank: number; total: number }>(sql, [ticker]);
+  c.header("Cache-Control", STABLE_CACHE);
+  return c.json(out.rows[0] ?? { rank: null, total: 0 });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
 // Overview + feeds (home page)
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -886,135 +1002,120 @@ app.get("/companies/:ticker/sheet", async (c) => {
   if (companyR.rows.length === 0) return c.json({ error: "not found" }, 404);
   const { cik } = companyR.rows[0]!;
 
-  // Latest extraction id (may be null if extract-proxy hasn't run yet)
-  const extR = await pool().query<{
-    id: number; fiscal_year_covered: number; extracted_at: string; raw_json: unknown;
-  }>(
-    `select id, fiscal_year_covered, extracted_at::text, raw_json
-     from proxy_extractions
-     where cik = $1
-     order by fiscal_year_covered desc, extracted_at desc
-     limit 1`,
-    [cik],
-  );
-  const extraction = extR.rows[0] ?? null;
+  // ──────────────────────────────────────────────────────────────────────
+  // Two parallel batches. The first resolves the latest extraction and
+  // the three queries that don't depend on it; the second runs the
+  // extraction-scoped queries once we know the id.
+  // ──────────────────────────────────────────────────────────────────────
 
-  // ── Highest-paid executive (latest fiscal year)
-  const highestPaid = extraction
-    ? await pool().query<{ name: string; title: string; fiscal_year: number; total: number }>(
-        `select name, title, fiscal_year, total
-         from summary_compensation
-         where extraction_id = $1
-           and total is not null
-         order by fiscal_year desc, total desc
-         limit 1`,
-        [extraction.id],
-      )
-    : { rows: [] as never[] };
-
-  // ── Latest PvP (XBRL preferred, proxy fallback)
-  const xbrl = await pool().query<{
+  type ExtRow = { id: number; fiscal_year_covered: number; extracted_at: string; raw_json: unknown };
+  type XbrlRow = {
     fiscal_year: number;
     peo_total_comp: number | null;
     peo_compensation_actually_paid: number | null;
     company_tsr_indexed: number | null;
     peer_group_tsr_indexed: number | null;
-  }>(
-    `select fiscal_year, peo_total_comp, peo_compensation_actually_paid,
-            company_tsr_indexed, peer_group_tsr_indexed
-     from xbrl_pay_vs_performance
-     where cik = $1
-     order by fiscal_year desc
-     limit 1`,
-    [cik],
-  );
-
-  // ── Board summary
-  const boardSummary = extraction
-    ? await pool().query<{
-        total: string; indep: string; not_indep: string; flags: string;
-        chair: string | null; lid: string | null;
-      }>(
-        `select
-           count(*)::text as total,
-           count(*) filter (where independent is true)::text as indep,
-           count(*) filter (where independent is false)::text as not_indep,
-           count(*) filter (where attendance_below_75pct is true)::text as flags,
-           max(case when is_chair then name end) as chair,
-           max(case when is_lead_independent_director then name end) as lid
-         from directors
-         where extraction_id = $1`,
-        [extraction.id],
-      )
-    : { rows: [{ total: "0", indep: "0", not_indep: "0", flags: "0", chair: null, lid: null }] };
-
-  // ── Top 5pct holders (limit 3) and top insider holdings
-  // The Zod normalizer in packages/shared maps a small set of canonical
-  // holder-type strings; the rest pass through as the model emitted them.
-  // Match permissively so the fact sheet surfaces 5%+ holders regardless
-  // of how the LLM phrased the category ("5pct_holder", "5%_stockholder",
-  // "5%_beneficial_owner", etc. — over a dozen variants exist in the
-  // table). Exclude directors/officers since they're shown elsewhere.
-  const topHolders = extraction
-    ? await pool().query(
-        `select name, holder_type, shares, percent_class
-         from equity_ownership
-         where extraction_id = $1
-           and percent_class is not null
-           and percent_class >= 5
-           and (
-             holder_type like '5%'
-             or holder_type like '%5pct%'
-             or holder_type like '%beneficial_owner%'
-             or holder_type like '%principal%'
-             or holder_type = 'group'
-           )
-         order by percent_class desc
-         limit 5`,
-        [extraction.id],
-      )
-    : { rows: [] };
-
-  // ── Insider flow: net dollar value of buys (P,A) minus sells (S,D) last 90d
-  const insiderFlow = await pool().query<{
-    buys_value: string; sells_value: string; buys_count: string; sells_count: string;
-  }>(
-    `select
-       coalesce(sum(transaction_value) filter (where transaction_code in ('P','A')), 0)::text as buys_value,
-       coalesce(sum(transaction_value) filter (where transaction_code in ('S','D')), 0)::text as sells_value,
-       count(*) filter (where transaction_code in ('P','A'))::text as buys_count,
-       count(*) filter (where transaction_code in ('S','D'))::text as sells_count
-     from insider_transactions
-     where cik = $1
-       and transaction_date >= current_date - interval '90 days'`,
-    [cik],
-  );
-
-  // ── 13D summary
-  const thirteenD = await pool().query<{
+  };
+  type InsiderFlowRow = { buys_value: string; sells_value: string; buys_count: string; sells_count: string };
+  type ThirteenDRow = {
     total: string; active_count: string;
     most_recent_filer: string | null;
     most_recent_pct: number | null;
     most_recent_date: string | null;
-  }>(
-    `select
-       count(*)::text as total,
-       count(*) filter (where is_active_intent is true)::text as active_count,
-       max(filer_name) filter (where filing_date = (select max(filing_date) from thirteen_d_filings where cik = $1)) as most_recent_filer,
-       max(aggregate_percent) filter (where filing_date = (select max(filing_date) from thirteen_d_filings where cik = $1)) as most_recent_pct,
-       max(filing_date::text) as most_recent_date
-     from thirteen_d_filings
-     where cik = $1`,
-    [cik],
-  );
+  };
 
-  // ── Related-party count
-  const rpt = extraction
-    ? await pool().query<{ n: string }>(
-        `select count(*)::text as n from related_party_transactions where extraction_id = $1`,
-        [extraction.id],
-      )
-    : { rows: [{ n: "0" }] };
+  const [extR, xbrl, insiderFlow, thirteenD] = await Promise.all([
+    pool().query<ExtRow>(
+      `select id, fiscal_year_covered, extracted_at::text, raw_json
+       from proxy_extractions where cik = $1
+       order by fiscal_year_covered desc, extracted_at desc limit 1`,
+      [cik],
+    ),
+    pool().query<XbrlRow>(
+      `select fiscal_year, peo_total_comp, peo_compensation_actually_paid,
+              company_tsr_indexed, peer_group_tsr_indexed
+       from xbrl_pay_vs_performance where cik = $1
+       order by fiscal_year desc limit 1`,
+      [cik],
+    ),
+    pool().query<InsiderFlowRow>(
+      `select
+         coalesce(sum(transaction_value) filter (where transaction_code in ('P','A')), 0)::text as buys_value,
+         coalesce(sum(transaction_value) filter (where transaction_code in ('S','D')), 0)::text as sells_value,
+         count(*) filter (where transaction_code in ('P','A'))::text as buys_count,
+         count(*) filter (where transaction_code in ('S','D'))::text as sells_count
+       from insider_transactions
+       where cik = $1 and transaction_date >= current_date - interval '90 days'`,
+      [cik],
+    ),
+    pool().query<ThirteenDRow>(
+      `select
+         count(*)::text as total,
+         count(*) filter (where is_active_intent is true)::text as active_count,
+         max(filer_name) filter (where filing_date = (select max(filing_date) from thirteen_d_filings where cik = $1)) as most_recent_filer,
+         max(aggregate_percent) filter (where filing_date = (select max(filing_date) from thirteen_d_filings where cik = $1)) as most_recent_pct,
+         max(filing_date::text) as most_recent_date
+       from thirteen_d_filings where cik = $1`,
+      [cik],
+    ),
+  ]);
+  const extraction = extR.rows[0] ?? null;
+
+  // Extraction-scoped batch. When there is no extraction, every query
+  // here would short-circuit anyway, so we elide the whole round-trip.
+  const [highestPaid, boardSummary, topHolders, rpt] = extraction
+    ? await Promise.all([
+        pool().query<{ name: string; title: string; fiscal_year: number; total: number }>(
+          `select name, title, fiscal_year, total
+           from summary_compensation
+           where extraction_id = $1 and total is not null
+           order by fiscal_year desc, total desc limit 1`,
+          [extraction.id],
+        ),
+        pool().query<{
+          total: string; indep: string; not_indep: string; flags: string;
+          chair: string | null; lid: string | null;
+        }>(
+          `select
+             count(*)::text as total,
+             count(*) filter (where independent is true)::text as indep,
+             count(*) filter (where independent is false)::text as not_indep,
+             count(*) filter (where attendance_below_75pct is true)::text as flags,
+             max(case when is_chair then name end) as chair,
+             max(case when is_lead_independent_director then name end) as lid
+           from directors where extraction_id = $1`,
+          [extraction.id],
+        ),
+        pool().query(
+          // Permissive holder-type match — the Zod normalizer in shared
+          // canonicalizes a few variants; the rest pass through as the
+          // model emitted them ("5pct_holder", "5%_beneficial_owner", …).
+          `select name, holder_type, shares, percent_class
+           from equity_ownership
+           where extraction_id = $1
+             and percent_class is not null
+             and percent_class >= 5
+             and (
+               holder_type like '5%'
+               or holder_type like '%5pct%'
+               or holder_type like '%beneficial_owner%'
+               or holder_type like '%principal%'
+               or holder_type = 'group'
+             )
+           order by percent_class desc limit 5`,
+          [extraction.id],
+        ),
+        pool().query<{ n: string }>(
+          `select count(*)::text as n from related_party_transactions where extraction_id = $1`,
+          [extraction.id],
+        ),
+      ])
+    : [
+        { rows: [] as never[] },
+        { rows: [{ total: "0", indep: "0", not_indep: "0", flags: "0", chair: null, lid: null }] },
+        { rows: [] as never[] },
+        { rows: [{ n: "0" }] },
+      ];
 
   // ── CEO pay ratio (from raw_json)
   let payRatio: { ratio_x_to_1: number | null; ceo_total: number | null; median_employee: number | null; fiscal_year: number | null } | null = null;

@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import {
   fetchCompany, fetchPrices, fetchCompensation, fetchBoard,
   fetchInsider, fetch13D, fetchFinancials, fetchMismanagementScorecard,
-  fetchMismanagement,
+  fetchMismanagementRank,
   type CompanyDetail, type PricePoint, type CompensationResponse,
   type BoardResponse, type InsiderTx, type ThirteenDFiling, type FinancialMetric,
   type MismanagementScorecard,
@@ -201,12 +201,8 @@ function ScorecardHero({
   const [universe, setUniverse] = useState<number | null>(null);
 
   useEffect(() => {
-    fetchMismanagement({ minMcap: 0, limit: 5000 })
-      .then((r) => {
-        const i = r.rows.findIndex((x) => x.ticker.toLowerCase() === ticker.toLowerCase());
-        if (i >= 0) setRank(i + 1);
-        setUniverse(r.total);
-      })
+    fetchMismanagementRank(ticker)
+      .then((r) => { setRank(r.rank); setUniverse(r.total); })
       .catch(() => {});
   }, [ticker]);
 

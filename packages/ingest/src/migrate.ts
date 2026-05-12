@@ -314,6 +314,21 @@ const statements = [
   )`,
   `create index if not exists ixbrl_facts_concept_idx on ixbrl_facts (concept, period_end desc)`,
   `create index if not exists ixbrl_facts_filing_idx on ixbrl_facts (accession_number)`,
+
+  // ── Perf indexes for the /mismanagement CTE pipeline. ────────────────
+  // The leaderboard query (and the /mismanagement/rank lookup the company
+  // page uses) does DISTINCT ON (cik, concept) ORDER BY cik, concept,
+  // fiscal_year DESC over financial_metrics. The existing PK is
+  // (cik, fiscal_year, concept) which doesn't match — Postgres has to
+  // sort. This index lets it stream straight out of the btree.
+  `create index if not exists financial_metrics_cik_concept_year_idx
+     on financial_metrics (cik, concept, fiscal_year desc)`,
+
+  // Same query filters insider_transactions / thirteen_d_filings by date
+  // only (no cik), so the existing (cik, date) composite indexes don't
+  // help that scan. A standalone date index does.
+  `create index if not exists insider_tx_date_idx on insider_transactions (transaction_date desc)`,
+  `create index if not exists thirteen_d_date_idx on thirteen_d_filings (filing_date desc) where is_active_intent`,
 ];
 
 for (const stmt of statements) {

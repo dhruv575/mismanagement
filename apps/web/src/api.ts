@@ -435,3 +435,11 @@ export interface MismanagementScorecard {
 }
 export const fetchMismanagementScorecard = (ticker: string) =>
   getJSON<MismanagementScorecard>(`/companies/${encodeURIComponent(ticker)}/mismanagement`);
+
+// Tiny endpoint just for the rank eyebrow on /company/:ticker. Avoids
+// dragging down /mismanagement?limit=5000 (which would otherwise be the
+// only way to find this ticker's position in the leaderboard).
+export const fetchMismanagementRank = (ticker: string) =>
+  getJSON<{ rank: number | null; total: number }>(
+    `/mismanagement/rank/${encodeURIComponent(ticker)}`,
+  );
