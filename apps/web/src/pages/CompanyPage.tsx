@@ -213,6 +213,10 @@ function ScorecardHero({
   const [universe, setUniverse] = useState<number | null>(null);
   const [downloading, setDownloading] = useState(false);
   const cardRef = useRef<HTMLElement>(null);
+  // Hidden render target for the downloadable share image. Lives outside
+  // the live page layout (positioned off-screen) so the live card can have
+  // one design and the downloaded PNG can have a different one.
+  const shareImageRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchMismanagementRank(ticker)
@@ -233,41 +237,22 @@ function ScorecardHero({
     .toUpperCase();
 
   async function downloadCard() {
-    if (!cardRef.current) return;
+    const node = shareImageRef.current;
+    if (!node) return;
     setDownloading(true);
-    let offscreen: HTMLDivElement | null = null;
     try {
-      // Clone the live card into an off-screen 390px-wide .ch-wrap so the
-      // card's container query falls back to the phone layout (the @container
-      // (min-width: 721px) rules stop applying when the container is narrow).
-      // We use a clone — not a width transform on the live element — because
-      // mutating the visible card would flash the layout for the user.
-      const clone = cardRef.current.cloneNode(true) as HTMLElement;
-      // ch-card-mode forces the 3x3 grid visible + the plain-English row
-      // list hidden, regardless of container width. The live page uses
-      // container queries to choose between the two; the downloaded card
-      // always wants the compact grid.
-      clone.classList.add("ch-card-mode");
-      offscreen = document.createElement("div");
-      offscreen.className = "ch-wrap ch-card-mode";
-      offscreen.style.cssText =
-        "position: fixed; top: -10000px; left: -10000px; width: 390px; pointer-events: none;";
-      offscreen.appendChild(clone);
-      document.body.appendChild(offscreen);
-
-      // Wait two frames for the container-query reflow to settle, plus fonts
-      // (Geist / Instrument Serif from Google Fonts) so the captured PNG
-      // doesn't fall back to system fonts.
+      // Wait two frames for any pending layout/font load, then capture the
+      // hidden share-image node directly (it's already off-screen at the
+      // intended share dimensions). No clone needed since the source isn't
+      // visible to the user — we can capture it in place.
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       if (document.fonts?.ready) await document.fonts.ready;
-
       const { toPng } = await import("html-to-image");
-      const dataUrl = await toPng(clone, {
+      const dataUrl = await toPng(node, {
         pixelRatio: 2,
         backgroundColor: "#0e0e10",
         cacheBust: true,
       });
-
       const a = document.createElement("a");
       a.href = dataUrl;
       a.download = `${ticker}-mismanagement.png`;
@@ -275,13 +260,102 @@ function ScorecardHero({
     } catch (e) {
       console.error("download failed", e);
     } finally {
-      if (offscreen?.parentNode) offscreen.parentNode.removeChild(offscreen);
       setDownloading(false);
     }
   }
 
   return (
     <div className="ch-wrap">
+      {/* Hidden share-image render target. The OFF-SCREENING lives on the
+          wrapper, not on .share-card itself — html-to-image carries any
+          inline positioning on the captured node into the resulting SVG's
+          foreignObject, so a `left: -100000px` on the node would render
+          the content outside the SVG viewport (resulting in an entirely
+          black PNG). The wrapper handles invisibility; the card stays at
+          natural 0,0 coordinates for capture. */}
+      <div
+        aria-hidden
+        style={{
+          position: "fixed",
+          left: "-100000px",
+          top: 0,
+          width: 0,
+          height: 0,
+          overflow: "visible",
+          pointerEvents: "none",
+        }}
+      >
+      <div ref={shareImageRef} className="share-card">
+        <header className="share-brand">
+          <div className="share-brand-left">
+            <MTSLogo size={22} />
+            <span className="share-brand-eyebrow">MTS · MISMANAGEMENT</span>
+          </div>
+          <span className="share-brand-date">{today}</span>
+        </header>
+        <section className="share-hero">
+          <div className="share-eyebrow">
+            {rank != null ? <span className="share-rank">RANK #{rank}</span> : null}
+            {universe ? <span>of {universe.toLocaleString()} R3K</span> : null}
+            {company.sic_description ? <><span>·</span><span>{company.sic_description}</span></> : null}
+          </div>
+          <div className="share-ticker">{company.ticker}</div>
+          <h1 className="share-name">{company.name}</h1>
+          <div className="share-chips">
+            {company.is_russell_3000 ? <span className="share-chip">Russell 3000</span> : null}
+            {company.fiscal_year_end ? <span className="share-chip">FY end {company.fiscal_year_end}</span> : null}
+            <span className="share-chip">{fmtUsdCompact(company.market_cap_at_universe_pull)} mkt cap</span>
+          </div>
+          <div className="share-kpis">
+            <div className="share-kpi">
+              <span className={`share-kpi-n ${fired >= 5 ? "hot" : ""}`}>
+                {fired}<span className="share-kpi-of">/{checks?.length ?? 9}</span>
+              </span>
+              <span className="share-kpi-l">flags fired</span>
+            </div>
+            <div className="share-kpi">
+              <span className={`share-kpi-n ${tsrGap != null && tsrGap > 0 ? "neg" : ""}`}>
+                {tsrGap == null ? "—" : tsrGap > 0 ? `−$${tsrGap.toFixed(0)}` : `+$${(-tsrGap).toFixed(0)}`}
+              </span>
+              <span className="share-kpi-l">TSR gap / $100</span>
+            </div>
+            <div className="share-kpi">
+              <span className={`share-kpi-n ${r && r.insider_net_365d < 0 ? "neg" : ""}`}>
+                {!r || r.insider_net_365d === 0
+                  ? "—"
+                  : `${r.insider_net_365d < 0 ? "−" : "+"}${fmtUsdCompact(Math.abs(r.insider_net_365d))}`}
+              </span>
+              <span className="share-kpi-l">insider 12-mo</span>
+            </div>
+          </div>
+        </section>
+        {checks ? (
+          <section className="share-flags">
+            <h2 className="share-section-h">What fired</h2>
+            <div className="share-flag-list">
+              {checks.filter((c) => c.fired).length === 0 ? (
+                <div className="share-flag-clean">No red flags fired — clean scorecard.</div>
+              ) : (
+                checks
+                  .filter((c) => c.fired)
+                  .map((c) => (
+                    <div key={c.short} className="share-flag-row">
+                      <span className="share-flag-dot" />
+                      <span className="share-flag-name">{c.name}</span>
+                      <span className="share-flag-value">{c.value}</span>
+                    </div>
+                  ))
+              )}
+            </div>
+          </section>
+        ) : null}
+        <footer className="share-foot">
+          <span>mts.report/mismanagement/{ticker.toLowerCase()}</span>
+          <span>CIK {company.cik}</span>
+        </footer>
+      </div>
+      </div>
+
       <div className="ch-actions">
         <button
           type="button"
