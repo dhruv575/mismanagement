@@ -80,7 +80,7 @@ function Candidate({ row }: { row: MismanagementRow }) {
       <div className="cand-top">
         <span className="cand-ticker">{row.ticker}</span>
         <span className="cand-count">
-          <strong>{fired}</strong>/8
+          <strong>{fired}</strong>/9
         </span>
       </div>
       <p className="cand-name">{row.name}</p>

@@ -29,7 +29,7 @@ const GROUPS: Group[] = [
   {
     title: "The scorecard",
     note:
-      "Eight binary flags. A flag fires when a deterministic rule (pure SQL over the fact tables) returns true. Ranking on /mismanagement is the count of fired flags.",
+      "Nine binary flags. A flag fires when a deterministic rule (pure SQL over the fact tables) returns true. Ranking on /mismanagement is the count of fired flags.",
     terms: [
       {
         label: "TSR",

@@ -140,7 +140,7 @@ export function MismanagementPage() {
       <header className="screen-head">
         <h1 className="screen-title">Mismanagement</h1>
         <p className="screen-sub">
-          Eight quantitative red flags, each binary, each backed by a number you can audit.
+          Nine quantitative red flags, each binary, each backed by a number you can audit.
           Ranking is the number of flags fired. The reader decides what counts as failure.
         </p>
       </header>
@@ -217,7 +217,7 @@ function Row({ row, rank }: { row: MismanagementRow; rank: number }) {
     <tr className={count >= 5 ? "mm-row mm-hot" : "mm-row"}>
       <td className="numeric">
         <span className="mm-rank">{rank}</span>
-        <div className="mm-flagcount">{count}/8</div>
+        <div className="mm-flagcount">{count}/9</div>
       </td>
       <td>
         <Link to={`/company/${row.ticker}`} className="screen-ticker mm-ticker">
