@@ -24,6 +24,9 @@ interface RecentFilings {
   reportDate: string[];
   form: string[];
   primaryDocument: string[];
+  // 8-K Item codes as a comma-separated string per filing (e.g. "5.02,9.01").
+  // Empty string for non-8-K filings or when EDGAR didn't tag items.
+  items?: string[];
 }
 
 interface SubmissionsResponse {
@@ -69,6 +72,7 @@ async function fetchAllFilingsForCik(cik: string): Promise<{ name: string; sicDe
     reportDate: [...sub.filings.recent.reportDate],
     form: [...sub.filings.recent.form],
     primaryDocument: [...sub.filings.recent.primaryDocument],
+    items: [...(sub.filings.recent.items ?? sub.filings.recent.accessionNumber.map(() => ""))],
   };
   for (const shard of sub.filings.files ?? []) {
     const shardData = await fetchJson<RecentFilings>(
@@ -79,6 +83,7 @@ async function fetchAllFilingsForCik(cik: string): Promise<{ name: string; sicDe
     merged.reportDate.push(...shardData.reportDate);
     merged.form.push(...shardData.form);
     merged.primaryDocument.push(...shardData.primaryDocument);
+    merged.items!.push(...(shardData.items ?? shardData.accessionNumber.map(() => "")));
   }
   return {
     name: sub.name,
@@ -314,6 +319,11 @@ async function pullOne(issuer: IssuerSeed, opts: { fullHistory: boolean; eftsBac
       } else if (form === "DEF 14A") {
         fiscalYear = parseInt(filingDate.slice(0, 4), 10) - 1;
       }
+      const itemsRaw = r.items?.[i] ?? "";
+      const items = itemsRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
       return {
         accession_number: r.accessionNumber[i]!,
         cik: issuer.cik,
@@ -323,6 +333,7 @@ async function pullOne(issuer: IssuerSeed, opts: { fullHistory: boolean; eftsBac
         primary_doc_url: primaryDocUrl(issuer.cik, r.accessionNumber[i]!, r.primaryDocument[i] ?? null),
         fiscal_period: null as string | null,
         fiscal_year: fiscalYear,
+        items,
       };
     });
 
@@ -333,13 +344,18 @@ async function pullOne(issuer: IssuerSeed, opts: { fullHistory: boolean; eftsBac
     await pool.query(
       `insert into filings (
          accession_number, cik, form, filing_date, primary_document, primary_doc_url,
-         fiscal_period, fiscal_year
+         fiscal_period, fiscal_year, items
        )
-       select * from unnest(
+       select acc, cik, form, fd, pd, pdu, fp, fy,
+              case when itm_csv = '' then array[]::text[]
+                   else string_to_array(itm_csv, '|') end
+       from unnest(
          $1::text[], $2::text[], $3::text[], $4::date[],
-         $5::text[], $6::text[], $7::text[], $8::int[]
-       )
-       on conflict (accession_number) do nothing`,
+         $5::text[], $6::text[], $7::text[], $8::int[], $9::text[]
+       ) as t(acc, cik, form, fd, pd, pdu, fp, fy, itm_csv)
+       on conflict (accession_number) do update set
+         items = excluded.items
+         where filings.items is null or filings.items = array[]::text[]`,
       [
         filings.map((f) => f.accession_number),
         filings.map((f) => f.cik),
@@ -349,6 +365,7 @@ async function pullOne(issuer: IssuerSeed, opts: { fullHistory: boolean; eftsBac
         filings.map((f) => f.primary_doc_url),
         filings.map((f) => f.fiscal_period),
         filings.map((f) => f.fiscal_year),
+        filings.map((f) => f.items.join("|")),
       ],
     );
   }

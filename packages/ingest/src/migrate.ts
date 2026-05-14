@@ -44,6 +44,13 @@ const statements = [
   `create index if not exists filings_cik_form_idx on filings (cik, form, filing_date desc)`,
   `create index if not exists filings_form_date_idx on filings (form, filing_date desc)`,
 
+  // EDGAR submissions JSON exposes per-filing 8-K Item codes (e.g. "5.07" for
+  // shareholder vote results). Capturing them on the filings row lets the
+  // vote extractor filter to ~1 filing/year/issuer without re-fetching doc
+  // bodies. Empty array (not null) when the source feed didn't supply items.
+  `alter table filings add column if not exists items text[]`,
+  `create index if not exists filings_items_idx on filings using gin (items)`,
+
   // Long-form financial metrics keyed by US-GAAP concept. One row per
   // (cik, fiscal_year, concept) with the company's reported value. We store
   // every concept we pull (revenue, opex breakdown, SBC, buybacks, etc.) so
@@ -288,6 +295,33 @@ const statements = [
   )`,
   `create index if not exists thirteen_d_cik_idx on thirteen_d_filings (cik, filing_date desc)`,
 
+  // 8-K Item 5.07 shareholder vote results. One row per filing; the worst
+  // outcomes (say-on-pay support and min director support) are denormalized
+  // for the leaderboard flag, while raw_proposals keeps the full list of
+  // proposals for the company page. Vote support is computed as
+  // for / (for + against) for SoP, and for / (for + withhold) for director
+  // elections, expressed 0-100.
+  `create table if not exists shareholder_votes (
+    accession_number text primary key references filings(accession_number) on delete cascade,
+    cik text not null references companies(cik) on delete cascade,
+    filing_date date not null,
+    meeting_date date,
+    sop_present boolean not null default false,
+    sop_for double precision,
+    sop_against double precision,
+    sop_abstain double precision,
+    sop_support_pct double precision,
+    director_vote_present boolean not null default false,
+    director_count int,
+    min_director_support_pct double precision,
+    worst_director_name text,
+    sop_frequency_chosen text,
+    raw_proposals jsonb not null,
+    extracted_at timestamptz not null default now(),
+    model text not null
+  )`,
+  `create index if not exists shareholder_votes_cik_idx on shareholder_votes (cik, filing_date desc)`,
+
   // Generic facts pulled from inline XBRL of DEF 14A primary docs. One row
   // per (filing, concept, context). The context_ref + dimension_members
   // combine to identify which NEO/year/scenario the value applies to. We
@@ -365,6 +399,10 @@ const statements = [
     flag_dilutive_sbc boolean not null default false,
     flag_returns_over_fcf boolean not null default false,
     flag_goodwill_heavy boolean not null default false,
+    flag_governance_dissent boolean not null default false,
+    latest_sop_support_pct double precision,
+    latest_min_director_support_pct double precision,
+    latest_vote_meeting_date date,
     flags_fired int not null default 0,
     tiebreak double precision not null default 0,
     refreshed_at timestamptz not null default now()
@@ -373,6 +411,12 @@ const statements = [
   // Index covers the first two columns; ticker is read from the join.
   `create index if not exists mismanagement_scores_rank_idx
      on mismanagement_scores (flags_fired desc, tiebreak desc)`,
+  // Existing deployments need the new columns even if mismanagement_scores
+  // was created before the 9th flag landed.
+  `alter table mismanagement_scores add column if not exists flag_governance_dissent boolean not null default false`,
+  `alter table mismanagement_scores add column if not exists latest_sop_support_pct double precision`,
+  `alter table mismanagement_scores add column if not exists latest_min_director_support_pct double precision`,
+  `alter table mismanagement_scores add column if not exists latest_vote_meeting_date date`,
 ];
 
 for (const stmt of statements) {

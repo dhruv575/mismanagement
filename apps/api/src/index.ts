@@ -497,6 +497,7 @@ const MISMANAGEMENT_FLAGS = [
   "dilutive_sbc",     // 6. SBC > 10% of revenue (latest FY)
   "returns_over_fcf", // 7. (Buybacks + dividends) > OCF (latest FY)
   "goodwill_heavy",   // 8. Goodwill > 40% of total assets
+  "governance_dissent", // 9. Latest SoP support <80% OR any director support <80%
 ] as const;
 
 app.get("/mismanagement", async (c) => {
@@ -520,6 +521,9 @@ app.get("/mismanagement", async (c) => {
       ms.flag_tsr_under, ms.flag_pay_through_it, ms.flag_active_13d,
       ms.flag_insider_selling, ms.flag_earnings_cash, ms.flag_dilutive_sbc,
       ms.flag_returns_over_fcf, ms.flag_goodwill_heavy,
+      ms.flag_governance_dissent,
+      ms.latest_sop_support_pct, ms.latest_min_director_support_pct,
+      ms.latest_vote_meeting_date::text as latest_vote_meeting_date,
       count(*) over() as total
     from mismanagement_scores ms
     join companies c on c.cik = ms.cik
@@ -541,6 +545,9 @@ app.get("/mismanagement", async (c) => {
     flag_tsr_under: boolean; flag_pay_through_it: boolean; flag_active_13d: boolean;
     flag_insider_selling: boolean; flag_earnings_cash: boolean; flag_dilutive_sbc: boolean;
     flag_returns_over_fcf: boolean; flag_goodwill_heavy: boolean;
+    flag_governance_dissent: boolean;
+    latest_sop_support_pct: number | null; latest_min_director_support_pct: number | null;
+    latest_vote_meeting_date: string | null;
     total: string;
   }>(sql, [minMcap, limit, offset]);
 
@@ -567,7 +574,10 @@ app.get("/companies/:ticker/mismanagement", async (c) => {
        ms.insider_net_365d, ms.active_13d_count,
        ms.flag_tsr_under, ms.flag_pay_through_it, ms.flag_active_13d,
        ms.flag_insider_selling, ms.flag_earnings_cash, ms.flag_dilutive_sbc,
-       ms.flag_returns_over_fcf, ms.flag_goodwill_heavy
+       ms.flag_returns_over_fcf, ms.flag_goodwill_heavy,
+       ms.flag_governance_dissent,
+       ms.latest_sop_support_pct, ms.latest_min_director_support_pct,
+       ms.latest_vote_meeting_date::text as latest_vote_meeting_date
      from companies c
      join mismanagement_scores ms on ms.cik = c.cik
      where c.ticker = $1

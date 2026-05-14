@@ -1139,7 +1139,8 @@ code {
 }
 .ch-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* 9 flags → 3×3 lays out cleanly without an orphan tile. */
+  grid-template-columns: repeat(3, 1fr);
   gap: 5px;
 }
 .ch-tile {

@@ -379,7 +379,8 @@ export type MismanagementFlagId =
   | "earnings_cash"
   | "dilutive_sbc"
   | "returns_over_fcf"
-  | "goodwill_heavy";
+  | "goodwill_heavy"
+  | "governance_dissent";
 
 export interface MismanagementRow {
   cik: string;
@@ -412,6 +413,10 @@ export interface MismanagementRow {
   flag_dilutive_sbc: boolean;
   flag_returns_over_fcf: boolean;
   flag_goodwill_heavy: boolean;
+  flag_governance_dissent: boolean;
+  latest_sop_support_pct: number | null;
+  latest_min_director_support_pct: number | null;
+  latest_vote_meeting_date: string | null;
 }
 
 export interface MismanagementResponse {

@@ -83,6 +83,12 @@ const SQL = `
       and filing_date >= current_date - interval '18 months'
     group by cik
   ),
+  vote_latest as (
+    select distinct on (cik) cik, meeting_date, sop_support_pct, min_director_support_pct
+    from shareholder_votes
+    where sop_support_pct is not null or min_director_support_pct is not null
+    order by cik, coalesce(meeting_date, filing_date) desc
+  ),
   combined as (
     select c.cik,
       pa.years_under, pa.years_tracked, pa.peo_median,
@@ -105,7 +111,15 @@ const SQL = `
       coalesce(fm.ocf is not null and fm.ocf > 0
         and (coalesce(fm.buybacks, 0) + coalesce(fm.dividends_paid, 0)) > fm.ocf, false) as flag_returns_over_fcf,
       coalesce(fm_pit.goodwill is not null and fm_pit.total_assets is not null
-        and fm_pit.total_assets > 0 and fm_pit.goodwill > 0.40 * fm_pit.total_assets, false) as flag_goodwill_heavy
+        and fm_pit.total_assets > 0 and fm_pit.goodwill > 0.40 * fm_pit.total_assets, false) as flag_goodwill_heavy,
+      vl.sop_support_pct as latest_sop_support_pct,
+      vl.min_director_support_pct as latest_min_director_support_pct,
+      vl.meeting_date as latest_vote_meeting_date,
+      coalesce(
+        (vl.sop_support_pct is not null and vl.sop_support_pct < 80)
+        or (vl.min_director_support_pct is not null and vl.min_director_support_pct < 80),
+        false
+      ) as flag_governance_dissent
     from companies c
     left join pvp_agg pa on pa.cik = c.cik
     left join pvp_latest pl on pl.cik = c.cik
@@ -113,6 +127,7 @@ const SQL = `
     left join fm_pit on fm_pit.cik = c.cik
     left join insider_net ind on ind.cik = c.cik
     left join active_13d a13 on a13.cik = c.cik
+    left join vote_latest vl on vl.cik = c.cik
   )
   insert into mismanagement_scores (
     cik, years_under, years_tracked, peo_median,
@@ -121,6 +136,8 @@ const SQL = `
     total_assets, goodwill, insider_net_365d, active_13d_count,
     flag_tsr_under, flag_pay_through_it, flag_active_13d, flag_insider_selling,
     flag_earnings_cash, flag_dilutive_sbc, flag_returns_over_fcf, flag_goodwill_heavy,
+    flag_governance_dissent, latest_sop_support_pct, latest_min_director_support_pct,
+    latest_vote_meeting_date,
     flags_fired, tiebreak, refreshed_at
   )
   select
@@ -130,6 +147,8 @@ const SQL = `
     total_assets, goodwill, insider_net_365d, active_13d_count,
     flag_tsr_under, flag_pay_through_it, flag_active_13d, flag_insider_selling,
     flag_earnings_cash, flag_dilutive_sbc, flag_returns_over_fcf, flag_goodwill_heavy,
+    flag_governance_dissent, latest_sop_support_pct, latest_min_director_support_pct,
+    latest_vote_meeting_date,
     (case when flag_tsr_under then 1 else 0 end
       + case when flag_pay_through_it then 1 else 0 end
       + case when flag_active_13d then 1 else 0 end
@@ -138,6 +157,7 @@ const SQL = `
       + case when flag_dilutive_sbc then 1 else 0 end
       + case when flag_returns_over_fcf then 1 else 0 end
       + case when flag_goodwill_heavy then 1 else 0 end
+      + case when flag_governance_dissent then 1 else 0 end
     ) as flags_fired,
     (coalesce(latest_peer_tsr, 0) - coalesce(latest_company_tsr, 0)) * coalesce(peo_median, 0) as tiebreak,
     now() as refreshed_at

@@ -12,6 +12,7 @@
     "pull-universe": "tsx src/pull-universe.ts",
     "pull-form4": "tsx src/pull-form4.ts",
     "pull-13d": "tsx src/pull-13d.ts",
+    "pull-votes": "tsx src/pull-votes.ts",
     "extract-proxy": "tsx src/extract-proxy.ts",
     "refresh-mismanagement": "tsx src/refresh-mismanagement.ts",
     "screen": "tsx src/screen.ts",

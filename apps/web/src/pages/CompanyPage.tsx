@@ -183,6 +183,15 @@ function buildChecks(scorecard: MismanagementScorecard | null): ScorecardCheck[]
           ? `${pct((r.goodwill / r.total_assets) * 100)} of assets`
           : "—",
     },
+    {
+      short: "Vote", letter: "V", name: "Vote dissent",
+      rule: "Last say-on-pay <80% OR any director <80% support",
+      fired: !!r.flag_governance_dissent,
+      value:
+        r.latest_sop_support_pct != null || r.latest_min_director_support_pct != null
+          ? `SoP ${r.latest_sop_support_pct != null ? pct(r.latest_sop_support_pct) : "—"} / dir ${r.latest_min_director_support_pct != null ? pct(r.latest_min_director_support_pct) : "—"}`
+          : "—",
+    },
   ];
 }
 

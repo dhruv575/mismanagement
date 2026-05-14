@@ -95,6 +95,14 @@ const GROUPS: Group[] = [
           "OKTA: $5.41B goodwill / $11.58B total assets → 47%, mostly from the Auth0 acquisition.",
         source: "10-K / 10-Q balance sheet",
       },
+      {
+        label: "Vote",
+        aka: "Vote dissent",
+        def: "At the most recent annual meeting, either the advisory say-on-pay (SoP, the non-binding shareholder vote on executive compensation) received less than 80% support — For / (For + Against) — or at least one director nominee received less than 80% support — For / (For + Withheld). 80% is the threshold at which boards typically begin to address dissent.",
+        example:
+          "OKTA FY2024: SoP 92% support, lowest director support 96%. Flag does not fire.",
+        source: "8-K Item 5.07 (filed within 4 business days of the annual meeting)",
+      },
     ],
   },
   {

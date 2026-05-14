@@ -70,7 +70,7 @@ function diversify(rows: MismanagementRow[], count: number): MismanagementRow[] 
 const FLAG_KEYS = [
   "flag_tsr_under", "flag_pay_through_it", "flag_active_13d",
   "flag_insider_selling", "flag_earnings_cash", "flag_dilutive_sbc",
-  "flag_returns_over_fcf", "flag_goodwill_heavy",
+  "flag_returns_over_fcf", "flag_goodwill_heavy", "flag_governance_dissent",
 ] as const;
 
 function Candidate({ row }: { row: MismanagementRow }) {

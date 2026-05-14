@@ -102,6 +102,21 @@ const FLAGS: FlagDef[] = [
         ? `Goodwill ${((r.goodwill / r.total_assets) * 100).toFixed(0)}% of assets`
         : null,
   },
+  {
+    id: "governance_dissent",
+    short: "Vote",
+    long: "Last say-on-pay <80% support OR any director <80% support",
+    fired: (r) => r.flag_governance_dissent,
+    evidence: (r) => {
+      const sop = r.latest_sop_support_pct;
+      const dir = r.latest_min_director_support_pct;
+      if (sop == null && dir == null) return null;
+      const parts: string[] = [];
+      if (sop != null) parts.push(`SoP ${sop.toFixed(0)}%`);
+      if (dir != null) parts.push(`min dir ${dir.toFixed(0)}%`);
+      return parts.join(" · ");
+    },
+  },
 ];
 
 export function MismanagementPage() {
