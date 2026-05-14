@@ -828,19 +828,27 @@ code {
 .mm-summary { font-family: var(--font-mono); font-size: 12px; color: var(--ink-mute); }
 
 .comp-search {
+  display: block;
   margin-top: 14px;
   width: 100%;
-  max-width: 480px;
-  background: rgba(0, 0, 0, 0.4);
-  color: var(--ink);
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  padding: 10px 14px;
+  max-width: 540px;
+  background: var(--bg-2, #1a1a1d);
+  color: var(--ink-strong, var(--ink));
+  border: 1.5px solid var(--ink-mute);
+  border-radius: 8px;
+  padding: 13px 16px 13px 42px;
   font-family: var(--font-mono);
-  font-size: 13px;
-  letter-spacing: 0.04em;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a0a0a8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.3-4.3'/></svg>");
+  background-repeat: no-repeat;
+  background-position: 14px center;
+  background-size: 16px 16px;
+  transition: border-color 0.12s, background-color 0.12s;
 }
-.comp-search:focus { outline: none; border-color: var(--ink-mute); }
+.comp-search::placeholder { color: var(--ink-mute); }
+.comp-search:focus { outline: none; border-color: var(--ink); background-color: rgba(255,255,255,0.04); }
 
 .mm-filters {
   display: flex;
@@ -884,10 +892,11 @@ code {
 }
 .mm-pill:hover { color: var(--ink); border-color: var(--ink-mute); }
 .mm-pill.on {
-  background: var(--ink);
-  color: var(--bg-0);
-  border-color: var(--ink);
+  background: rgba(255, 255, 255, 0.10);
+  color: var(--ink-strong, var(--ink));
+  border-color: rgba(255, 255, 255, 0.28);
 }
+.mm-pill.on:hover { color: var(--ink); border-color: rgba(255, 255, 255, 0.4); }
 .mm-sector-select {
   background: rgba(0, 0, 0, 0.4);
   color: var(--ink);
@@ -902,6 +911,36 @@ code {
   max-width: 360px;
 }
 .mm-sector-select:disabled { opacity: 0.5; }
+
+.mm-search {
+  display: block;
+  margin: 20px 0 0;
+  width: 100%;
+  max-width: 540px;
+  background: var(--bg-2, #1a1a1d);
+  color: var(--ink-strong, var(--ink));
+  border: 1.5px solid var(--ink-mute);
+  border-radius: 8px;
+  padding: 13px 16px 13px 42px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23a0a0a8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.3-4.3'/></svg>");
+  background-repeat: no-repeat;
+  background-position: 14px center;
+  background-size: 16px 16px;
+  transition: border-color 0.12s, background-color 0.12s;
+}
+.mm-search::placeholder { color: var(--ink-mute); }
+.mm-search:focus { outline: none; border-color: var(--ink); background-color: rgba(255,255,255,0.04); }
+
+.mm-pill-clear {
+  background: transparent !important;
+  color: var(--ink-mute) !important;
+  border-style: dashed !important;
+}
+.mm-pill-clear:hover { color: var(--ink) !important; }
 
 .ar-page .mm-filter-pills { gap: 6px; }
 .ar-tag {
@@ -952,6 +991,16 @@ code {
 }
 .mm-table th.numeric, .mm-table td.numeric { text-align: right; }
 .mm-table tbody tr:hover { background: rgba(255, 255, 255, 0.025); }
+
+/* On phones (and most tablets in portrait) the flag-dot strip and the
+   evidence chips wrap each chip onto its own line and blow up row
+   height. Hide both columns; the reader can tap a ticker for the full
+   breakdown. Breakpoint is generous (880px) so iPad-portrait and small
+   landscape phones still get the compact layout. */
+@media (max-width: 880px) {
+  .mm-col-flags, .mm-col-evidence { display: none !important; }
+  .mm-table th, .mm-table td { padding: 10px 8px; }
+}
 .mm-row.mm-hot { background: rgba(255, 88, 88, 0.04); }
 .mm-row.mm-hot:hover { background: rgba(255, 88, 88, 0.07); }
 .mm-rank {
@@ -1233,7 +1282,21 @@ code {
 }
 
 /* 4 — 8-flag grid */
-.ch-grid-section { display: flex; flex-direction: column; gap: 6px; }
+/* Mobile default: hide the compact 3x3 grid in favor of the plain-English
+   row list below (it's collapsable). Desktop container query flips this
+   back; card-mode also forces grid visible. */
+.ch-grid-section { display: none; flex-direction: column; gap: 6px; }
+/* Tile body has two flavors of label: curt name (for the downloaded card)
+   and the full question rule (for the live desktop page). They're
+   mutually exclusive — see ch-tile-rule rules below and the card-mode
+   override at the very bottom of this file. */
+.ch-tile-name {
+  display: none;
+  font-size: 11.5px;
+  line-height: 1.25;
+  color: var(--ink-dim);
+}
+.ch-tile--fired .ch-tile-name { color: #ffd6d6; }
 .ch-eyebrow {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -1327,9 +1390,33 @@ code {
 .ch-numeric-value.neg { color: #f87171; }
 
 /* 6 — evidence chips */
-/* All-9 row explainers (replaces the scorecard grid + evidence-only list).
-   Each row is one flag, dot turns red + body wash red when fired. */
-.ch-checks { display: flex; flex-direction: column; gap: 6px; }
+/* Plain-English row explainers. Wrapped in <details> so mobile users can
+   collapse to free up scroll space. Hidden when the card-mode override
+   is in play (downloaded card). On wide containers we show the compact
+   3x3 grid instead and hide the row list. */
+.ch-checks-details { display: block; margin: 8px 0 0; }
+.ch-checks-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  border-top: 1px solid var(--line);
+}
+.ch-checks-summary::-webkit-details-marker { display: none; }
+.ch-checks-summary-caret {
+  transition: transform 0.15s;
+  font-size: 14px;
+  color: var(--ink-dim);
+}
+.ch-checks-details[open] .ch-checks-summary-caret { transform: rotate(180deg); }
+.ch-checks { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
 .ch-check {
   display: grid;
   grid-template-columns: 16px 1fr;
@@ -1497,7 +1584,9 @@ code {
   .ch-verdict-num span { font-size: 52px; }
   .ch-verdict-text { font-size: 36px; }
   .ch-verdict-source { font-size: 11px; letter-spacing: 0.14em; }
-  .ch-grid-section { gap: 14px; }
+  /* Desktop flips: grid replaces the row list. */
+  .ch-grid-section { display: flex; gap: 14px; }
+  .ch-checks-details { display: none; }
   .ch-eyebrow { font-size: 11px; letter-spacing: 0.20em; }
   .ch-grid { gap: 10px; }
   .ch-tile {
@@ -1660,4 +1749,79 @@ code {
     padding: 14px 0;
   }
 }
+
+/* ────────────────────────────────────────────────────────
+ * Mobile audit — shrink page chrome, tame oversized type,
+ * keep wide tables in a horizontal scroll, never let any
+ * element push the document wider than the viewport.
+ * Driven by a single 880px breakpoint to match the table
+ * column-hide rule above.
+ * ──────────────────────────────────────────────────────── */
+@media (max-width: 880px) {
+  /* Prevent any descendant (a fixed-width chart, a wide table, a stray
+     padding) from forcing horizontal scroll on the whole document. */
+  html, body { overflow-x: hidden; }
+
+  /* Page-level containers all share the same outer padding so columns
+     of text align between routes. */
+  .mismanagement,
+  .comp-page,
+  .glossary,
+  .company { padding: 24px 16px 64px; }
+
+  /* Section titles: the 48px serif italic is gorgeous on desktop and
+     overwhelming on a 375px screen. */
+  .screen-title { font-size: 34px; }
+  .activity-title { font-size: 34px; }
+  .activity-sub, .screen-sub { font-size: 14px; }
+  .home-grid-title { font-size: 24px; }
+
+  /* Home: keep the section header on one line if it can; otherwise wrap
+     so the "View the full leaderboard →" link doesn't squeeze the title. */
+  .home-grid-head { flex-wrap: wrap; gap: 8px; }
+  .home-grid-more { font-size: 10.5px; }
+
+  /* Footer is one of the easiest places to break a layout — two long
+     phrases at 11px with letter-spacing don't fit side-by-side on phones. */
+  .site-foot {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 14px 16px;
+    gap: 6px;
+    font-size: 10.5px;
+  }
+
+  /* Pill groups on the mismanagement page already wrap, but the filter
+     wrapper itself can get cramped. */
+  .mm-filters { padding: 14px; gap: 12px; }
+  .mm-filter-row { gap: 12px; }
+  .mm-search { font-size: 13px; padding: 11px 14px 11px 38px; background-size: 14px 14px; background-position: 12px center; }
+
+  /* Comp/Activity pages: data-table rows are wide enough that they
+     should always be a horizontal-scroll context on mobile, never
+     forcing the whole page sideways. */
+  .data-table { white-space: nowrap; }
+  .section, .activity-head + .section { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* Fact-sheet (Compensation / Performance / Activity) cards stack. */
+  .fact-grid { grid-template-columns: 1fr !important; }
+  .fact-card { padding: 14px 16px; }
+
+  /* /comp tables drop the Company / Title / FY columns on mobile so the
+     row reduces to Rank · Ticker · Executive · Total — readable without
+     a horizontal scroll. */
+  .comp-col-mobile-hide { display: none !important; }
+}
+
+/* Card download mode: always render the compact 3x3 grid (with curt
+   labels) and never the plain-English row list, regardless of the cloned
+   container's width. Higher specificity than the mobile default. */
+.ch-wrap.ch-card-mode .ch-grid-section,
+.ch-card-mode .ch-grid-section { display: flex; }
+.ch-wrap.ch-card-mode .ch-checks-details,
+.ch-card-mode .ch-checks-details { display: none; }
+/* In card mode the tile shows the curt name and hides the full question;
+   the desktop website does the opposite. */
+.ch-card-mode .ch-tile-rule { display: none !important; }
+.ch-card-mode .ch-tile-name { display: block !important; }
 

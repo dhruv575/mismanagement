@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  fetchMismanagement, fetchSearch,
+  fetchMismanagementUniverse, fetchSearch,
   type MismanagementRow, type SearchHit,
 } from "../api.js";
 import { fmtUsdCompact } from "../lib/format.js";
@@ -14,12 +14,16 @@ export function HomePage() {
   const [hot, setHot] = useState<MismanagementRow[] | null>(null);
 
   useEffect(() => {
-    fetchMismanagement({ minMcap: 1e9, limit: 300 })
+    // Same cached universe payload the mismanagement page uses --
+    // hitting / after /mismanagement (or vice versa) is now a free
+    // navigation. We filter to $1B+ caps here client-side.
+    fetchMismanagementUniverse()
       .then((r) => {
-        // EBAY is the framing example in the hero dek; pin it first if it's
-        // in the universe at all, then diversify the rest by sector.
-        const ebay = r.rows.find((x) => x.ticker === "EBAY");
-        const rest = r.rows.filter((x) => x.ticker !== "EBAY");
+        const candidates = r.rows.filter(
+          (x) => x.market_cap == null || x.market_cap >= 1e9,
+        );
+        const ebay = candidates.find((x) => x.ticker === "EBAY");
+        const rest = candidates.filter((x) => x.ticker !== "EBAY");
         const diversified = diversify(rest, ebay ? 9 : 10);
         setHot(ebay ? [ebay, ...diversified] : diversified);
       })
@@ -35,7 +39,7 @@ export function HomePage() {
           Whether or not Ryan Cohen is able to successfully complete his
           takeover of Ebay, many of the criticisms he has mounted at their
           executives will hopefully have positive effects on the long run
-          future of the company. We judged the management of 2,201 other
+          future of the company. We judged the management of 2,538 other
           publicly traded companies and compiled the results for your
           viewing pleasure.
         </p>

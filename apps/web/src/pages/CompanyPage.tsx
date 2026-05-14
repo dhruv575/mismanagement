@@ -243,8 +243,13 @@ function ScorecardHero({
       // We use a clone — not a width transform on the live element — because
       // mutating the visible card would flash the layout for the user.
       const clone = cardRef.current.cloneNode(true) as HTMLElement;
+      // ch-card-mode forces the 3x3 grid visible + the plain-English row
+      // list hidden, regardless of container width. The live page uses
+      // container queries to choose between the two; the downloaded card
+      // always wants the compact grid.
+      clone.classList.add("ch-card-mode");
       offscreen = document.createElement("div");
-      offscreen.className = "ch-wrap";
+      offscreen.className = "ch-wrap ch-card-mode";
       offscreen.style.cssText =
         "position: fixed; top: -10000px; left: -10000px; width: 390px; pointer-events: none;";
       offscreen.appendChild(clone);
@@ -330,6 +335,27 @@ function ScorecardHero({
             </div>
           </section>
 
+          {/* 4 — 3x3 scorecard grid (desktop view + downloaded card).
+                  Each tile renders both the curt name (for the card) and
+                  the full question (for the live desktop page); CSS picks
+                  which one is visible based on .ch-card-mode. */}
+          <section className="ch-grid-section">
+            <h2 className="ch-eyebrow">THE SCORECARD</h2>
+            <div className="ch-grid">
+              {checks.map((c) => (
+                <div key={c.short} className={`ch-tile ${c.fired ? "ch-tile--fired" : ""}`}>
+                  <span className="ch-tile-row">
+                    <span className="ch-tile-dot" />
+                    <span className="ch-tile-label">{c.short}</span>
+                  </span>
+                  <span className="ch-tile-name">{c.name}</span>
+                  <p className="ch-tile-rule">{c.rule}</p>
+                  <span className="ch-tile-value">{c.value}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
           {/* 5 — key numerics */}
           <section className="ch-numerics">
             <div className="ch-numeric">
@@ -358,21 +384,27 @@ function ScorecardHero({
             </div>
           </section>
 
-          {/* 6 — all-9 row explainers (replaces the redundant scorecard grid) */}
-          <section className="ch-checks">
-            {checks.map((c) => (
-              <div
-                key={c.short}
-                className={`ch-check ${c.fired ? "ch-check--fired" : ""}`}
-              >
-                <span className="ch-check-dot" />
-                <div className="ch-check-body">
-                  <p className="ch-check-rule">{c.rule}</p>
-                  <span className="ch-check-value">{c.value}</span>
+          {/* 6 — plain-English row explainers, collapsable on mobile */}
+          <details className="ch-checks-details" open>
+            <summary className="ch-checks-summary">
+              <span className="ch-checks-summary-label">What each flag means</span>
+              <span className="ch-checks-summary-caret">▾</span>
+            </summary>
+            <section className="ch-checks">
+              {checks.map((c) => (
+                <div
+                  key={c.short}
+                  className={`ch-check ${c.fired ? "ch-check--fired" : ""}`}
+                >
+                  <span className="ch-check-dot" />
+                  <div className="ch-check-body">
+                    <p className="ch-check-rule">{c.rule}</p>
+                    <span className="ch-check-value">{c.value}</span>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </section>
+              ))}
+            </section>
+          </details>
         </>
       ) : null}
 

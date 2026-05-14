@@ -502,19 +502,25 @@ const MISMANAGEMENT_FLAGS = [
 
 app.get("/mismanagement", async (c) => {
   const minMcap = Number(c.req.query("min_mcap") ?? 500e6);
-  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 100), 1), 500);
+  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 100), 1), 3000);
   const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
 
   // Reads from the materialized mismanagement_scores table — refreshed
   // out-of-band by refresh-mismanagement.ts. Single-pass index scan, no
   // CTE pipeline at request time.
+  //
+  // The select list is deliberately narrow: every column here is shown
+  // somewhere on the leaderboard (table row + evidence chips + sector +
+  // mcap + flag dots). Dropped capex, latest_pvp_year, latest_vote_meeting_date
+  // because the leaderboard doesn't reference them; per-company endpoints
+  // serve those when a reader drills in.
   const sql = `
     select
       c.cik, c.ticker, c.name, c.sic_description,
       c.market_cap_at_universe_pull as market_cap,
       ms.years_under, ms.years_tracked, ms.peo_median,
-      ms.latest_company_tsr, ms.latest_peer_tsr, ms.latest_pvp_year,
-      ms.revenue, ms.net_income, ms.ocf, ms.capex, ms.sbc,
+      ms.latest_company_tsr, ms.latest_peer_tsr,
+      ms.revenue, ms.net_income, ms.ocf, ms.sbc,
       ms.buybacks, ms.dividends_paid,
       ms.total_assets, ms.goodwill,
       ms.insider_net_365d, ms.active_13d_count,
@@ -523,7 +529,6 @@ app.get("/mismanagement", async (c) => {
       ms.flag_returns_over_fcf, ms.flag_goodwill_heavy,
       ms.flag_governance_dissent,
       ms.latest_sop_support_pct, ms.latest_min_director_support_pct,
-      ms.latest_vote_meeting_date::text as latest_vote_meeting_date,
       count(*) over() as total
     from mismanagement_scores ms
     join companies c on c.cik = ms.cik
@@ -533,30 +538,37 @@ app.get("/mismanagement", async (c) => {
     limit $2 offset $3
   `;
 
-  const r = await pool().query<{
-    cik: string; ticker: string; name: string; sic_description: string | null;
-    market_cap: number | null;
-    years_under: number | null; years_tracked: number | null; peo_median: number | null;
-    latest_company_tsr: number | null; latest_peer_tsr: number | null; latest_pvp_year: number | null;
-    revenue: number | null; net_income: number | null; ocf: number | null; capex: number | null;
-    sbc: number | null; buybacks: number | null; dividends_paid: number | null;
-    total_assets: number | null; goodwill: number | null;
-    insider_net_365d: number; active_13d_count: number;
-    flag_tsr_under: boolean; flag_pay_through_it: boolean; flag_active_13d: boolean;
-    flag_insider_selling: boolean; flag_earnings_cash: boolean; flag_dilutive_sbc: boolean;
-    flag_returns_over_fcf: boolean; flag_goodwill_heavy: boolean;
-    flag_governance_dissent: boolean;
-    latest_sop_support_pct: number | null; latest_min_director_support_pct: number | null;
-    latest_vote_meeting_date: string | null;
-    total: string;
-  }>(sql, [minMcap, limit, offset]);
+  const r = await pool().query<Record<string, unknown> & { total: string }>(
+    sql,
+    [minMcap, limit, offset],
+  );
 
-  c.header("Cache-Control", STABLE_CACHE);
+  // Strip null fields per-row — Postgres returns every column as a key
+  // including the ~40% that are null per typical row, and JSON.stringify
+  // serializes them as ",field:null". On 2.5K rows that's hundreds of KB
+  // of pure overhead before gzip. The client treats missing == null.
+  const slim: Record<string, unknown>[] = [];
+  for (const row of r.rows) {
+    const out: Record<string, unknown> = {};
+    for (const k in row) {
+      if (k === "total") continue;
+      const v = row[k];
+      if (v != null && v !== false) out[k] = v; // also drop false flag bools
+    }
+    slim.push(out);
+  }
+
+  // The materialized scoreboard refreshes via daily cron; serve aggressively
+  // and let Vercel Edge keep the JSON warm at the CDN.
+  c.header(
+    "Cache-Control",
+    "public, max-age=300, s-maxage=86400, stale-while-revalidate=604800",
+  );
   return c.json({
     count: r.rows.length,
     total: r.rows[0] ? Number(r.rows[0].total) : 0,
     flags: MISMANAGEMENT_FLAGS,
-    rows: r.rows.map(({ total: _t, ...rest }) => rest),
+    rows: slim,
   });
 });
 
@@ -1123,7 +1135,9 @@ app.get("/feeds/13d-by-filer", async (c) => {
 // ─────────────────────────────────────────────────────────────────────────
 
 app.get("/feeds/comp-highest", async (c) => {
-  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 20), 1), 100);
+  // Cap raised so the CompPage can pull the full corpus and search across
+  // every covered company, not just the top 25.
+  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 20), 1), 3000);
   const r = await pool().query(
     `with latest_ext as (
        select distinct on (cik) cik, id, fiscal_year_covered
@@ -1152,7 +1166,7 @@ app.get("/feeds/comp-highest", async (c) => {
 });
 
 app.get("/feeds/comp-pay-gap", async (c) => {
-  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 20), 1), 100);
+  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 20), 1), 3000);
   // (PEO comp actually paid) - (PEO total comp). Positive = paid more in
   // value than reported in summary; negative = paid less (PvP markdowns
   // dominated). Both directions are editorially interesting; we surface by
@@ -1188,7 +1202,7 @@ app.get("/feeds/comp-pay-gap", async (c) => {
 });
 
 app.get("/feeds/comp-pay-ratio", async (c) => {
-  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 20), 1), 100);
+  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 20), 1), 3000);
   // ceo_pay_ratio lives in raw_json; query via jsonb. Some extractions
   // have it, some don't. ratio_x_to_1 is the "CEO comp ÷ median employee
   // comp" multiple disclosed under Dodd-Frank Section 953(b).
@@ -1208,6 +1222,12 @@ app.get("/feeds/comp-pay-ratio", async (c) => {
      from latest_ext le
      join companies c on c.cik = le.cik
      where le.raw_json->'ceo_pay_ratio'->>'ratio_x_to_1' is not null
+       -- Drop methodology-artifact rows where the disclosed median employee
+       -- compensation is under $10k. Examples: LBRDA in 2025 reported a $33
+       -- median because a pending merger froze normal pay; NUS's median is
+       -- a Mainland China direct-sales rep paid by commission. Real, but
+       -- not a pay-disparity story.
+       and (le.raw_json->'ceo_pay_ratio'->>'median_employee_compensation')::double precision >= 10000
      order by ratio_x_to_1 desc nulls last
      limit $1`,
     [limit],

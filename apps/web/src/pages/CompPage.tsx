@@ -51,13 +51,16 @@ function matches(q: string, ticker: string, name: string): boolean {
 }
 
 function HighestBoard({ q }: { q: string }) {
-  const [rows, setRows] = useState<CompHighestRow[] | null>(null);
+  const [rows, setRows] = useState<(CompHighestRow & { _rank: number })[] | null>(null);
   useEffect(() => {
     // Pull a deeper slice so client-side search has something to filter
-    // through. The visible table still caps at 25.
-    fetchCompHighest(500).then((r) => setRows(r.rows)).catch(() => setRows([]));
+    // through. Each row carries its canonical universe rank (position in
+    // the unfiltered list) so search doesn't renumber the leaderboard.
+    fetchCompHighest(3000)
+      .then((r) => setRows(r.rows.map((row, i) => ({ ...row, _rank: i + 1 }))))
+      .catch(() => setRows([]));
   }, []);
-  const filtered = (rows ?? []).filter((r) => matches(q, r.ticker, r.company_name)).slice(0, 25);
+  const filtered = (rows ?? []).filter((r) => matches(q, r.ticker, r.company_name)).slice(0, 10);
   return (
     <section className="section">
       <h2 className="section-title">Highest named-executive total comp</h2>
@@ -68,23 +71,23 @@ function HighestBoard({ q }: { q: string }) {
             <tr>
               <th>Rank</th>
               <th>Ticker</th>
-              <th>Company</th>
+              <th className="comp-col-mobile-hide">Company</th>
               <th>Executive</th>
-              <th>Title</th>
-              <th className="numeric">FY</th>
+              <th className="comp-col-mobile-hide">Title</th>
+              <th className="numeric comp-col-mobile-hide">FY</th>
               <th className="numeric">Total</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r, i) => (
-              <tr key={`${r.ticker}-${i}`}>
-                <td className="screen-sector">{i + 1}</td>
+            {filtered.map((r) => (
+              <tr key={`${r.ticker}-${r._rank}`}>
+                <td className="screen-sector">{r._rank}</td>
                 <td><Link to={`/company/${r.ticker}`} className="screen-ticker">{r.ticker}</Link></td>
-                <td>{r.company_name}</td>
+                <td className="comp-col-mobile-hide">{r.company_name}</td>
                 <td><strong>{r.executive_name}</strong></td>
-                <td className="screen-sector">{r.title}</td>
-                <td className="numeric">{r.fiscal_year}</td>
-                <td className="numeric"><strong>{fmtUsd(r.total)}</strong></td>
+                <td className="screen-sector comp-col-mobile-hide">{r.title}</td>
+                <td className="numeric comp-col-mobile-hide">{r.fiscal_year}</td>
+                <td className="numeric">{fmtUsd(r.total)}</td>
               </tr>
             ))}
           </tbody>
@@ -95,11 +98,13 @@ function HighestBoard({ q }: { q: string }) {
 }
 
 function PayGapBoard({ q }: { q: string }) {
-  const [rows, setRows] = useState<CompPayGapRow[] | null>(null);
+  const [rows, setRows] = useState<(CompPayGapRow & { _rank: number })[] | null>(null);
   useEffect(() => {
-    fetchCompPayGap(500).then((r) => setRows(r.rows)).catch(() => setRows([]));
+    fetchCompPayGap(3000)
+      .then((r) => setRows(r.rows.map((row, i) => ({ ...row, _rank: i + 1 }))))
+      .catch(() => setRows([]));
   }, []);
-  const filtered = (rows ?? []).filter((r) => matches(q, r.ticker, r.company_name)).slice(0, 25);
+  const filtered = (rows ?? []).filter((r) => matches(q, r.ticker, r.company_name)).slice(0, 10);
   return (
     <section className="section">
       <h2 className="section-title">Reported vs realized CEO pay</h2>
@@ -117,8 +122,8 @@ function PayGapBoard({ q }: { q: string }) {
           <thead>
             <tr>
               <th>Ticker</th>
-              <th>Company</th>
-              <th className="numeric">FY</th>
+              <th className="comp-col-mobile-hide">Company</th>
+              <th className="numeric comp-col-mobile-hide">FY</th>
               <th className="numeric">Total comp</th>
               <th className="numeric">Comp paid</th>
               <th className="numeric">Gap</th>
@@ -128,8 +133,8 @@ function PayGapBoard({ q }: { q: string }) {
             {filtered.map((r) => (
               <tr key={r.ticker}>
                 <td><Link to={`/company/${r.ticker}`} className="screen-ticker">{r.ticker}</Link></td>
-                <td>{r.company_name}</td>
-                <td className="numeric">{r.fiscal_year}</td>
+                <td className="comp-col-mobile-hide">{r.company_name}</td>
+                <td className="numeric comp-col-mobile-hide">{r.fiscal_year}</td>
                 <td className="numeric">{fmtUsdCompact(r.peo_total_comp)}</td>
                 <td className="numeric">{fmtUsdCompact(r.peo_compensation_actually_paid)}</td>
                 <td className="numeric">
@@ -147,11 +152,13 @@ function PayGapBoard({ q }: { q: string }) {
 }
 
 function PayRatioBoard({ q }: { q: string }) {
-  const [rows, setRows] = useState<CompPayRatioRow[] | null>(null);
+  const [rows, setRows] = useState<(CompPayRatioRow & { _rank: number })[] | null>(null);
   useEffect(() => {
-    fetchCompPayRatio(500).then((r) => setRows(r.rows)).catch(() => setRows([]));
+    fetchCompPayRatio(3000)
+      .then((r) => setRows(r.rows.map((row, i) => ({ ...row, _rank: i + 1 }))))
+      .catch(() => setRows([]));
   }, []);
-  const filtered = (rows ?? []).filter((r) => matches(q, r.ticker, r.company_name)).slice(0, 25);
+  const filtered = (rows ?? []).filter((r) => matches(q, r.ticker, r.company_name)).slice(0, 10);
   return (
     <section className="section">
       <h2 className="section-title">Highest CEO / median-employee pay ratio</h2>
@@ -162,20 +169,20 @@ function PayRatioBoard({ q }: { q: string }) {
             <tr>
               <th>Rank</th>
               <th>Ticker</th>
-              <th>Company</th>
-              <th className="numeric">FY</th>
+              <th className="comp-col-mobile-hide">Company</th>
+              <th className="numeric comp-col-mobile-hide">FY</th>
               <th className="numeric">Ratio</th>
               <th className="numeric">CEO total</th>
               <th className="numeric">Median employee</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r, i) => (
+            {filtered.map((r) => (
               <tr key={r.ticker}>
-                <td className="screen-sector">{i + 1}</td>
+                <td className="screen-sector">{r._rank}</td>
                 <td><Link to={`/company/${r.ticker}`} className="screen-ticker">{r.ticker}</Link></td>
-                <td>{r.company_name}</td>
-                <td className="numeric">{r.fiscal_year_covered}</td>
+                <td className="comp-col-mobile-hide">{r.company_name}</td>
+                <td className="numeric comp-col-mobile-hide">{r.fiscal_year_covered}</td>
                 <td className="numeric"><strong>{r.ratio_x_to_1.toFixed(0)}:1</strong></td>
                 <td className="numeric">{fmtUsd(r.ceo_total)}</td>
                 <td className="numeric">{fmtUsd(r.median_employee)}</td>

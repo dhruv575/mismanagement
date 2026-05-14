@@ -414,18 +414,20 @@ export interface MismanagementRow {
   goodwill: number | null;
   insider_net_365d: number;
   active_13d_count: number;
-  flag_tsr_under: boolean;
-  flag_pay_through_it: boolean;
-  flag_active_13d: boolean;
-  flag_insider_selling: boolean;
-  flag_earnings_cash: boolean;
-  flag_dilutive_sbc: boolean;
-  flag_returns_over_fcf: boolean;
-  flag_goodwill_heavy: boolean;
-  flag_governance_dissent: boolean;
+  // Flag bools are omitted from the API payload when false (saves ~25%
+  // of the response over 2.5K rows). Missing == false. Always coerce
+  // with `!!row.flag_x` or `?? false` when reading these.
+  flag_tsr_under?: boolean;
+  flag_pay_through_it?: boolean;
+  flag_active_13d?: boolean;
+  flag_insider_selling?: boolean;
+  flag_earnings_cash?: boolean;
+  flag_dilutive_sbc?: boolean;
+  flag_returns_over_fcf?: boolean;
+  flag_goodwill_heavy?: boolean;
+  flag_governance_dissent?: boolean;
   latest_sop_support_pct: number | null;
   latest_min_director_support_pct: number | null;
-  latest_vote_meeting_date: string | null;
 }
 
 export interface MismanagementResponse {
@@ -442,6 +444,45 @@ export const fetchMismanagement = (opts: { minMcap?: number; limit?: number; off
   if (opts.offset != null) sp.set("offset", String(opts.offset));
   return getJSON<MismanagementResponse>(`/mismanagement?${sp.toString()}`);
 };
+
+// Cached universe payload. Two layers:
+//   1. localStorage with a 6h TTL — refreshes within a day are instant
+//      and pageloads after a hot reload also skip the network.
+//   2. Module-level Promise — within a single page lifetime, dedupes any
+//      simultaneous callers and avoids parsing the JSON twice.
+// The materialized scoreboard refreshes via daily cron, so a stale cache
+// is at worst a day behind reality (and we keep the TTL well under that).
+const UNIVERSE_LS_KEY = "mm.universe.v1";
+const UNIVERSE_TTL_MS = 6 * 60 * 60 * 1000;
+let _fullUniversePromise: Promise<MismanagementResponse> | null = null;
+export function fetchMismanagementUniverse(): Promise<MismanagementResponse> {
+  if (_fullUniversePromise) return _fullUniversePromise;
+
+  // localStorage lookup first.
+  try {
+    const cached = typeof localStorage !== "undefined" ? localStorage.getItem(UNIVERSE_LS_KEY) : null;
+    if (cached) {
+      const parsed = JSON.parse(cached) as { ts: number; data: MismanagementResponse };
+      if (Date.now() - parsed.ts < UNIVERSE_TTL_MS) {
+        _fullUniversePromise = Promise.resolve(parsed.data);
+        return _fullUniversePromise;
+      }
+    }
+  } catch { /* malformed cache — fall through and refetch */ }
+
+  _fullUniversePromise = fetchMismanagement({ minMcap: 0, limit: 3000 })
+    .then((r) => {
+      try {
+        localStorage.setItem(UNIVERSE_LS_KEY, JSON.stringify({ ts: Date.now(), data: r }));
+      } catch { /* quota / private mode — non-fatal */ }
+      return r;
+    })
+    .catch((e) => {
+      _fullUniversePromise = null; // allow retry on next call
+      throw e;
+    });
+  return _fullUniversePromise;
+}
 
 export interface MismanagementScorecard {
   flags: MismanagementFlagId[];

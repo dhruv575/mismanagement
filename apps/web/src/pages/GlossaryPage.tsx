@@ -34,7 +34,7 @@ const GROUPS: Group[] = [
       {
         label: "TSR",
         aka: "Trailed peers",
-        def: "Company total-shareholder-return trailed the company's own self-stated peer group in 3+ of the last 5 disclosed fiscal years.",
+        def: "If you invested $100 in this company or invested $100 across its peers, which would give you a higher return? The flag fires when the peer group beat the company in 3 or more of the last 5 disclosed fiscal years.",
         example:
           "OKTA: $100 invested at the start of FY2022 became $33 at the end of FY2026; the same $100 in the peer group became $256 — trailed in 4 of 5 years.",
         source: "DEF 14A pay-vs-performance table",
@@ -42,7 +42,7 @@ const GROUPS: Group[] = [
       {
         label: "Pay",
         aka: "Paid through it",
-        def: "Median principal-executive-officer (PEO, i.e. the CEO) total compensation across disclosed years ≥ $15M AND the TSR flag also fires.",
+        def: "Was the CEO still getting paid over $15 million while the company underperformed its peers? Fires when median principal-executive-officer (PEO, i.e. CEO) total compensation across disclosed years is at least $15M AND the TSR flag is also firing.",
         example:
           "Salesforce's median PEO comp over the 5 pay-vs-performance (PvP) years is ~$28M; over the same window company TSR trailed peers — both halves of the rule fire.",
         source: "DEF 14A summary compensation table + PvP",
@@ -50,15 +50,15 @@ const GROUPS: Group[] = [
       {
         label: "13D",
         aka: "Active 13D",
-        def: "At least one Schedule 13D filed against the issuer in the last 18 months with active intent (filer intends to influence control, board, or strategy).",
+        def: "Have any outside entities accumulated over 5% of the company in the past 18 months with the disclosed intent to influence control, board, or strategy? That's the filing every activist campaign starts with.",
         example:
           "Elliott Management filed a 13D on Salesforce in Jan 2023 citing intent to push for board changes and operating-margin discipline.",
-        source: "Schedule 13D / 13G filings",
+        source: "Schedule 13D filings",
       },
       {
         label: "Insid",
         aka: "Insider selling",
-        def: "Net insider open-market activity (purchases minus sales) over the last 12 months is below −$10M.",
+        def: "Have the company's executives and insiders been buying or selling the company's equity? The flag fires when net open-market activity (purchases minus sales) over the last 12 months is worse than −$10M.",
         example:
           "OKTA TTM: $267K bought versus $58.4M sold across 11 reporting persons → −$58.1M net.",
         source: "Form 4",
@@ -66,7 +66,7 @@ const GROUPS: Group[] = [
       {
         label: "Cash",
         aka: "Earnings ≠ cash",
-        def: "Latest-fiscal-year operating cash flow is less than 80% of GAAP net income — earnings outpacing cash generation.",
+        def: "Is the profit the company reports actually showing up as cash in the bank? Fires when operating cash flow in the latest fiscal year is less than 80% of GAAP net income — i.e. the income statement is outpacing the cash statement.",
         example:
           "A company reporting $1.0B net income but only $0.6B OCF (60%) fires — cash conversion below threshold.",
         source: "10-K / 10-Q",
@@ -74,7 +74,7 @@ const GROUPS: Group[] = [
       {
         label: "SBC",
         aka: "Dilutive SBC",
-        def: "Latest-fiscal-year stock-based compensation exceeds 10% of revenue.",
+        def: "Is the company giving away an unusually large slice of itself each year as employee stock compensation? Fires when stock-based comp in the latest fiscal year is greater than 10% of revenue.",
         example:
           "OKTA FY2024: $828M SBC against $2.61B revenue → 32% of revenue.",
         source: "10-K / 10-Q",
@@ -82,7 +82,7 @@ const GROUPS: Group[] = [
       {
         label: "Cap",
         aka: "Returns over OCF",
-        def: "Latest-fiscal-year buybacks plus dividends exceed operating cash flow — capital returns funded from balance sheet rather than earnings.",
+        def: "Is the company spending more on buybacks and dividends than the cash it actually generates from operations? Fires when buybacks plus dividends in the latest fiscal year exceed operating cash flow — i.e. capital returns are being funded with debt or the balance sheet, not earnings.",
         example:
           "Boeing FY2022: $5.0B in buybacks + dividends against ~$3.5B OCF → fires; the gap was funded with debt.",
         source: "10-K cash-flow statement",
@@ -90,7 +90,7 @@ const GROUPS: Group[] = [
       {
         label: "GW",
         aka: "Goodwill heavy",
-        def: "Goodwill is greater than 40% of total assets — heavy exposure to impairment if acquired businesses underperform.",
+        def: "Has the company spent so much buying other businesses that the premium it paid for them now dominates its balance sheet? Goodwill is the accounting plug for that premium and gets written down if acquisitions underperform. Fires when goodwill is greater than 40% of total assets.",
         example:
           "OKTA: $5.41B goodwill / $11.58B total assets → 47%, mostly from the Auth0 acquisition.",
         source: "10-K / 10-Q balance sheet",
@@ -98,7 +98,7 @@ const GROUPS: Group[] = [
       {
         label: "Vote",
         aka: "Vote dissent",
-        def: "At the most recent annual meeting, either the advisory say-on-pay (SoP, the non-binding shareholder vote on executive compensation) received less than 80% support — For / (For + Against) — or at least one director nominee received less than 80% support — For / (For + Withheld). 80% is the threshold at which boards typically begin to address dissent.",
+        def: "At the last annual meeting, did shareholders meaningfully push back against executive pay or any specific director? Fires when the advisory say-on-pay (SoP) vote received less than 80% support — For / (For + Against) — or any director nominee received less than 80% support — For / (For + Withheld). 80% is the threshold at which boards typically start to address dissent.",
         example:
           "OKTA FY2024: SoP 92% support, lowest director support 96%. Flag does not fire.",
         source: "8-K Item 5.07 (filed within 4 business days of the annual meeting)",
