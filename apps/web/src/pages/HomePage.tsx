@@ -15,7 +15,14 @@ export function HomePage() {
 
   useEffect(() => {
     fetchMismanagement({ minMcap: 1e9, limit: 300 })
-      .then((r) => setHot(diversify(r.rows, 10)))
+      .then((r) => {
+        // EBAY is the framing example in the hero dek; pin it first if it's
+        // in the universe at all, then diversify the rest by sector.
+        const ebay = r.rows.find((x) => x.ticker === "EBAY");
+        const rest = r.rows.filter((x) => x.ticker !== "EBAY");
+        const diversified = diversify(rest, ebay ? 9 : 10);
+        setHot(ebay ? [ebay, ...diversified] : diversified);
+      })
       .catch(() => setHot([]));
   }, []);
 
@@ -25,10 +32,12 @@ export function HomePage() {
         <p className="hero-eyebrow">MTS · ACTIVIST</p>
         <h1 className="hero-title">Mismanagement, in numbers.</h1>
         <p className="hero-dek">
-          An activist-style screen built from filings every public US company is
-          already required to publish — SEC EDGAR XBRL, DEF 14A proxy
-          statements, Form 4 insider transactions, Schedule 13D blocks. The
-          schema captures facts; characterization is the reader's job.
+          Whether or not Ryan Cohen is able to successfully complete his
+          takeover of Ebay, many of the criticisms he has mounted at their
+          executives will hopefully have positive effects on the long run
+          future of the company. We judged the management of 2,201 other
+          publicly traded companies and compiled the results for your
+          viewing pleasure.
         </p>
         <SearchBar />
       </section>

@@ -12,6 +12,9 @@ import { MTSLogo } from "../components/MTSLogo.js";
 import { FactSheet } from "../components/FactSheet.js";
 import { PeerComparison } from "../components/PeerComparison.js";
 import { fmtUsdCompact, fmtUsd, fmtCompact, fmtDate, fmtPctRaw } from "../lib/format.js";
+import {
+  Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from "recharts";
 
 interface State {
   company: CompanyDetail | null;
@@ -122,25 +125,25 @@ function buildChecks(scorecard: MismanagementScorecard | null): ScorecardCheck[]
   return [
     {
       short: "TSR", letter: "T", name: "Trailed peers",
-      rule: "Total shareholder return below the company's self-stated peer group in 3+ of the last 5 disclosed years",
+      rule: "If you invested $100 in this company or invested $100 across its peers, which would give you a higher return?",
       fired: !!r.flag_tsr_under,
       value: r.years_tracked != null ? `${r.years_under ?? 0}/${r.years_tracked} yrs` : "—",
     },
     {
       short: "Pay", letter: "P", name: "Paid through it",
-      rule: "Median CEO total compensation ≥ $15M while trailing peers",
+      rule: "Was the CEO still getting paid over $15 million while the company underperformed its peers?",
       fired: !!r.flag_pay_through_it,
       value: r.peo_median != null ? `${fmtUsdCompact(r.peo_median)} median` : "—",
     },
     {
       short: "13D", letter: "D", name: "Active 13D",
-      rule: "Active-intent 13D filed in last 18 months",
+      rule: "Have any outside entities accumulated over 5% of the company in the past 18 months?",
       fired: !!r.flag_active_13d,
       value: r.active_13d_count > 0 ? `${r.active_13d_count} filing` : "none",
     },
     {
       short: "Insid", letter: "I", name: "Insider selling",
-      rule: "Net insider P − S < −$10M over last 12 months",
+      rule: "Have the company's executives and insiders been buying or selling the company's equity?",
       fired: !!r.flag_insider_selling,
       value:
         r.insider_net_365d === 0
@@ -149,7 +152,7 @@ function buildChecks(scorecard: MismanagementScorecard | null): ScorecardCheck[]
     },
     {
       short: "Cash", letter: "C", name: "Earnings ≠ cash",
-      rule: "Operating cash flow < 80% of net income (latest FY)",
+      rule: "Is the profit the company reports actually showing up as cash in the bank?",
       fired: !!r.flag_earnings_cash,
       value:
         r.ocf != null && r.net_income != null && r.net_income > 0
@@ -158,7 +161,7 @@ function buildChecks(scorecard: MismanagementScorecard | null): ScorecardCheck[]
     },
     {
       short: "SBC", letter: "S", name: "Dilutive SBC",
-      rule: "Stock-based comp > 10% of revenue (latest FY)",
+      rule: "Is the company giving away an unusually large slice of itself each year as employee stock compensation?",
       fired: !!r.flag_dilutive_sbc,
       value:
         r.sbc != null && r.revenue != null && r.revenue > 0
@@ -167,7 +170,7 @@ function buildChecks(scorecard: MismanagementScorecard | null): ScorecardCheck[]
     },
     {
       short: "Cap", letter: "R", name: "Returns over OCF",
-      rule: "(Buybacks + dividends) > operating cash flow",
+      rule: "Is the company spending more on buybacks and dividends than the cash it actually generates from operations?",
       fired: !!r.flag_returns_over_fcf,
       value:
         r.ocf != null
@@ -176,7 +179,7 @@ function buildChecks(scorecard: MismanagementScorecard | null): ScorecardCheck[]
     },
     {
       short: "GW", letter: "G", name: "Goodwill heavy",
-      rule: "Goodwill > 40% of total assets",
+      rule: "Has the company spent so much buying other businesses that the premium it paid for them now dominates its balance sheet?",
       fired: !!r.flag_goodwill_heavy,
       value:
         r.goodwill != null && r.total_assets != null && r.total_assets > 0
@@ -185,7 +188,7 @@ function buildChecks(scorecard: MismanagementScorecard | null): ScorecardCheck[]
     },
     {
       short: "Vote", letter: "V", name: "Vote dissent",
-      rule: "Last say-on-pay <80% OR any director <80% support",
+      rule: "At the last annual meeting, did shareholders meaningfully push back against executive pay or any specific director?",
       fired: !!r.flag_governance_dissent,
       value:
         r.latest_sop_support_pct != null || r.latest_min_director_support_pct != null
@@ -309,16 +312,6 @@ function ScorecardHero({
         </div>
         <h1 className="ch-ticker">{company.ticker}</h1>
         <p className="ch-name">{company.name}</p>
-        <p className="ch-meta">
-          {[
-            company.sic_description,
-            `CIK ${company.cik}`,
-            company.fiscal_year_end ? `FY end ${company.fiscal_year_end}` : null,
-            company.is_russell_3000 ? "RUSSELL 3000" : null,
-          ]
-            .filter(Boolean)
-            .join("  ·  ")}
-        </p>
       </section>
 
       {checks ? (
@@ -332,25 +325,8 @@ function ScorecardHero({
             <div className="ch-verdict-right">
               <em className="ch-verdict-text">flags fired</em>
               <span className="ch-verdict-source">
-                DETERMINISTIC CHECKS · 10-K · DEF 14A · FORM 4 · 13D
+                Determined by referencing their 10-K, DEF 14A proxy, Form 4 insider transactions, Schedule 13D, and 8-K Item 5.07 vote results.
               </span>
-            </div>
-          </section>
-
-          {/* 4 — 8-flag grid */}
-          <section className="ch-grid-section">
-            <h2 className="ch-eyebrow">THE SCORECARD</h2>
-            <div className="ch-grid">
-              {checks.map((c) => (
-                <div key={c.short} className={`ch-tile ${c.fired ? "ch-tile--fired" : ""}`}>
-                  <span className="ch-tile-row">
-                    <span className="ch-tile-dot" />
-                    <span className="ch-tile-label">{c.short}</span>
-                  </span>
-                  <p className="ch-tile-rule">{c.rule}</p>
-                  <span className="ch-tile-value">{c.value}</span>
-                </div>
-              ))}
             </div>
           </section>
 
@@ -382,20 +358,21 @@ function ScorecardHero({
             </div>
           </section>
 
-          {/* 6 — evidence chips (only fired flags) */}
-          {fired > 0 ? (
-            <section className="ch-evidence">
-              {checks
-                .filter((c) => c.fired)
-                .map((c) => (
-                  <div key={c.short} className="ch-evidence-row">
-                    <span className="ch-evidence-letter">{c.letter}</span>
-                    <span className="ch-evidence-title">{c.name}</span>
-                    <span className="ch-evidence-value">{c.value}</span>
-                  </div>
-                ))}
-            </section>
-          ) : null}
+          {/* 6 — all-9 row explainers (replaces the redundant scorecard grid) */}
+          <section className="ch-checks">
+            {checks.map((c) => (
+              <div
+                key={c.short}
+                className={`ch-check ${c.fired ? "ch-check--fired" : ""}`}
+              >
+                <span className="ch-check-dot" />
+                <div className="ch-check-body">
+                  <p className="ch-check-rule">{c.rule}</p>
+                  <span className="ch-check-value">{c.value}</span>
+                </div>
+              </div>
+            ))}
+          </section>
         </>
       ) : null}
 
@@ -433,21 +410,75 @@ function ChSparkDelta({ prices }: { prices: PricePoint[] }) {
 function ChSpark({ prices }: { prices: PricePoint[] }) {
   if (prices.length < 2)
     return <div className="ch-spark-empty">— no price history —</div>;
-  const W = 1200;
-  const H = 120;
-  const ys = prices.map((p) => p.adj_close);
+
+  // Down-sample to ~260 points so 1300-point datasets don't bog the chart.
+  const data = sample(prices, 260).map((p) => ({
+    date: p.trading_date,
+    close: p.adj_close,
+  }));
+  const ys = data.map((d) => d.close);
   const minY = Math.min(...ys);
   const maxY = Math.max(...ys);
-  const range = maxY - minY || 1;
-  const x = (i: number) => (i / (prices.length - 1)) * W;
-  const y = (v: number) => H - ((v - minY) / range) * H;
-  let line = `M ${x(0)} ${y(ys[0]!)}`;
-  for (let i = 1; i < prices.length; i++) line += ` L ${x(i)} ${y(ys[i]!)}`;
+  const pad = (maxY - minY) * 0.05 || 1;
+
   return (
-    <svg className="ch-spark-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-      <path d={line} fill="none" stroke="var(--accent)" strokeWidth={2.5} />
-    </svg>
+    <div className="ch-spark-chart">
+      <ResponsiveContainer width="100%" height={160}>
+        <AreaChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+          <defs>
+            <linearGradient id="ch-spark-grad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.35} />
+              <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
+          <XAxis
+            dataKey="date"
+            tick={{ fill: "var(--ink-mute)", fontSize: 10 }}
+            tickFormatter={(d: string) => d.slice(0, 7)}
+            minTickGap={60}
+            stroke="var(--rule)"
+          />
+          <YAxis
+            domain={[minY - pad, maxY + pad]}
+            tick={{ fill: "var(--ink-mute)", fontSize: 10 }}
+            tickFormatter={(v: number) => `$${v.toFixed(0)}`}
+            width={48}
+            stroke="var(--rule)"
+          />
+          <Tooltip
+            contentStyle={{
+              background: "var(--bg-1)",
+              border: "1px solid var(--rule)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 12,
+              color: "var(--ink)",
+            }}
+            labelStyle={{ color: "var(--ink-mute)" }}
+            formatter={(v) => [`$${Number(v).toFixed(2)}`, "Adj close"]}
+            labelFormatter={(d) => String(d)}
+          />
+          <Area
+            type="monotone"
+            dataKey="close"
+            stroke="var(--accent)"
+            strokeWidth={2}
+            fill="url(#ch-spark-grad)"
+            isAnimationActive={false}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
   );
+}
+
+function sample<T>(arr: T[], n: number): T[] {
+  if (arr.length <= n) return arr;
+  const step = arr.length / n;
+  const out: T[] = [];
+  for (let i = 0; i < n; i++) out.push(arr[Math.floor(i * step)]!);
+  out.push(arr[arr.length - 1]!);
+  return out;
 }
 
 function RelatedPartySection({ board }: { board: BoardResponse | null }) {

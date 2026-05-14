@@ -645,18 +645,23 @@ app.get("/overview", async (c) => {
 });
 
 app.get("/feeds/13d-recent", async (c) => {
-  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 8), 1), 50);
+  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 8), 1), 200);
+  const activeOnly = c.req.query("active_only") === "1";
+  const sinceDays = Math.min(Math.max(Number(c.req.query("since_days") ?? 365), 1), 1825);
   const r = await pool().query(
     `select t.accession_number, t.form, t.filing_date::text, t.filer_name,
             t.is_active_intent, t.purpose_summary,
             t.cooperation_agreement_present, t.standstill_present,
             t.aggregate_percent, t.group_members,
-            c.ticker, c.name as company_name
+            c.ticker, c.name as company_name, c.sic_description,
+            c.market_cap_at_universe_pull as market_cap
      from thirteen_d_filings t
      join companies c on c.cik = t.cik
+     where t.filing_date >= current_date - ($2::int || ' days')::interval
+       ${activeOnly ? "and t.is_active_intent = true" : ""}
      order by t.filing_date desc
      limit $1`,
-    [limit],
+    [limit, sinceDays],
   );
   c.header("Cache-Control", STABLE_CACHE);
   return c.json({ count: r.rows.length, filings: r.rows });

@@ -18,29 +18,46 @@ import { fmtUsd, fmtUsdCompact } from "../lib/format.js";
 // All three are sparse until extract-proxy has run universe-wide.
 
 export function CompPage() {
+  const [q, setQ] = useState("");
   return (
     <div className="comp-page">
       <header className="activity-head">
         <h1 className="activity-title">Compensation outliers</h1>
         <p className="activity-sub">
-          Three views over the corpus. Pay-vs-Performance gap shows where
-          equity vesting moved CEO realized pay materially above or below
-          the reported summary number.
+          Three views over the corpus, all from DEF 14A proxy statements.
+          Search filters every table below by ticker or company name.
         </p>
+        <input
+          type="search"
+          className="comp-search"
+          placeholder="Search ticker or company…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          autoComplete="off"
+        />
       </header>
 
-      <HighestBoard />
-      <PayGapBoard />
-      <PayRatioBoard />
+      <HighestBoard q={q} />
+      <PayGapBoard q={q} />
+      <PayRatioBoard q={q} />
     </div>
   );
 }
 
-function HighestBoard() {
+function matches(q: string, ticker: string, name: string): boolean {
+  if (!q.trim()) return true;
+  const needle = q.trim().toLowerCase();
+  return ticker.toLowerCase().includes(needle) || name.toLowerCase().includes(needle);
+}
+
+function HighestBoard({ q }: { q: string }) {
   const [rows, setRows] = useState<CompHighestRow[] | null>(null);
   useEffect(() => {
-    fetchCompHighest(25).then((r) => setRows(r.rows)).catch(() => setRows([]));
+    // Pull a deeper slice so client-side search has something to filter
+    // through. The visible table still caps at 25.
+    fetchCompHighest(500).then((r) => setRows(r.rows)).catch(() => setRows([]));
   }, []);
+  const filtered = (rows ?? []).filter((r) => matches(q, r.ticker, r.company_name)).slice(0, 25);
   return (
     <section className="section">
       <h2 className="section-title">Highest named-executive total comp</h2>
@@ -59,7 +76,7 @@ function HighestBoard() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
+            {filtered.map((r, i) => (
               <tr key={`${r.ticker}-${i}`}>
                 <td className="screen-sector">{i + 1}</td>
                 <td><Link to={`/company/${r.ticker}`} className="screen-ticker">{r.ticker}</Link></td>
@@ -77,16 +94,22 @@ function HighestBoard() {
   );
 }
 
-function PayGapBoard() {
+function PayGapBoard({ q }: { q: string }) {
   const [rows, setRows] = useState<CompPayGapRow[] | null>(null);
   useEffect(() => {
-    fetchCompPayGap(25).then((r) => setRows(r.rows)).catch(() => setRows([]));
+    fetchCompPayGap(500).then((r) => setRows(r.rows)).catch(() => setRows([]));
   }, []);
+  const filtered = (rows ?? []).filter((r) => matches(q, r.ticker, r.company_name)).slice(0, 25);
   return (
     <section className="section">
-      <h2 className="section-title">Biggest pay-vs-paid gap</h2>
-      <p className="screen-sub" style={{ marginBottom: 14 }}>
-        Difference between "comp actually paid" (PvP, equity marked-to-market) and "total comp" (Summary Compensation Table).
+      <h2 className="section-title">Reported vs realized CEO pay</h2>
+      <p className="screen-sub" style={{ marginBottom: 14, maxWidth: 720 }}>
+        The Summary Compensation Table reports the value of stock and option
+        grants on the day they were awarded. The Pay-vs-Performance table
+        (mandatory since 2022) re-values those same grants based on what the
+        stock actually did over the year. A positive gap means the CEO's
+        equity rode the stock up after the grant; a negative gap means the
+        stock fell and the CEO took the loss too.
       </p>
       <SparseHint when={rows?.length === 0} />
       {rows == null ? <div className="loading-state">Loading…</div> : rows.length === 0 ? null : (
@@ -102,7 +125,7 @@ function PayGapBoard() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {filtered.map((r) => (
               <tr key={r.ticker}>
                 <td><Link to={`/company/${r.ticker}`} className="screen-ticker">{r.ticker}</Link></td>
                 <td>{r.company_name}</td>
@@ -123,11 +146,12 @@ function PayGapBoard() {
   );
 }
 
-function PayRatioBoard() {
+function PayRatioBoard({ q }: { q: string }) {
   const [rows, setRows] = useState<CompPayRatioRow[] | null>(null);
   useEffect(() => {
-    fetchCompPayRatio(25).then((r) => setRows(r.rows)).catch(() => setRows([]));
+    fetchCompPayRatio(500).then((r) => setRows(r.rows)).catch(() => setRows([]));
   }, []);
+  const filtered = (rows ?? []).filter((r) => matches(q, r.ticker, r.company_name)).slice(0, 25);
   return (
     <section className="section">
       <h2 className="section-title">Highest CEO / median-employee pay ratio</h2>
@@ -146,7 +170,7 @@ function PayRatioBoard() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
+            {filtered.map((r, i) => (
               <tr key={r.ticker}>
                 <td className="screen-sector">{i + 1}</td>
                 <td><Link to={`/company/${r.ticker}`} className="screen-ticker">{r.ticker}</Link></td>

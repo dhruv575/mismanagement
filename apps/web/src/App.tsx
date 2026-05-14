@@ -6,6 +6,7 @@ import { ScreenPage } from "./pages/ScreenPage.js";
 import { CompanyPage } from "./pages/CompanyPage.js";
 import { CompPage } from "./pages/CompPage.js";
 import { GlossaryPage } from "./pages/GlossaryPage.js";
+import { ActivistRiskPage } from "./pages/ActivistRiskPage.js";
 import { NotFoundPage } from "./pages/NotFoundPage.js";
 
 function ShellLayout() {
@@ -40,6 +41,7 @@ export function App() {
         <Route path="/screen-raw" element={<ScreenPage />} />
         <Route path="/company/:ticker" element={<CompanyPage />} />
         <Route path="/comp" element={<CompPage />} />
+        <Route path="/activist-risk" element={<ActivistRiskPage />} />
         <Route path="/glossary" element={<GlossaryPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

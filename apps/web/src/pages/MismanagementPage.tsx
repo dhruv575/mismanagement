@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   fetchMismanagement,
@@ -119,21 +119,66 @@ const FLAGS: FlagDef[] = [
   },
 ];
 
+const MCAP_BUCKETS: { label: string; value: number }[] = [
+  { label: "All", value: 0 },
+  { label: "$100M+", value: 100e6 },
+  { label: "$500M+", value: 500e6 },
+  { label: "$2B+", value: 2e9 },
+  { label: "$10B+", value: 10e9 },
+  { label: "$50B+", value: 50e9 },
+];
+
+type SortDir = "desc" | "asc";
+
 export function MismanagementPage() {
   const [rows, setRows] = useState<MismanagementRow[] | null>(null);
   const [total, setTotal] = useState(0);
   const [minMcap, setMinMcap] = useState(500e6);
+  const [sector, setSector] = useState<string>("");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setRows(null);
-    fetchMismanagement({ minMcap, limit: 200 })
+    fetchMismanagement({ minMcap, limit: 500 })
       .then((r) => {
         setRows(r.rows);
         setTotal(r.total);
       })
       .catch((e: Error) => setError(e.message));
   }, [minMcap]);
+
+  // Sectors derive from whichever rows the API returned for the current
+  // market-cap bucket. Counts give the user a sense of how many companies
+  // live behind each option before they pick one.
+  const sectors = useMemo(() => {
+    if (!rows) return [] as { name: string; count: number }[];
+    const counts = new Map<string, number>();
+    for (const r of rows) {
+      const s = (r.sic_description ?? "Other").trim();
+      counts.set(s, (counts.get(s) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }, [rows]);
+
+  // Sorting is client-side -- the API returns flags_fired-desc already, so
+  // "Most red flags" is a no-op; "Fewest" reverses. Sector filtering is also
+  // client-side: at 500-row depth it's instant and avoids round-tripping.
+  const visible = useMemo(() => {
+    if (!rows) return null;
+    let v = sector ? rows.filter((r) => (r.sic_description ?? "Other").trim() === sector) : rows;
+    if (sortDir === "asc") {
+      v = [...v].sort((a, b) => {
+        const af = countFlags(a);
+        const bf = countFlags(b);
+        if (af !== bf) return af - bf;
+        return a.ticker.localeCompare(b.ticker);
+      });
+    }
+    return v;
+  }, [rows, sector, sortDir]);
 
   return (
     <div className="mismanagement">
@@ -145,30 +190,72 @@ export function MismanagementPage() {
         </p>
       </header>
 
-      <FlagLegend />
+      <div className="mm-filters">
+        <div className="mm-filter-group">
+          <div className="mm-filter-label">Market cap</div>
+          <div className="mm-filter-pills">
+            {MCAP_BUCKETS.map((b) => (
+              <button
+                key={b.value}
+                type="button"
+                className={`mm-pill ${minMcap === b.value ? "on" : ""}`}
+                onClick={() => setMinMcap(b.value)}
+              >
+                {b.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-      <div className="mm-controls">
-        <label className="mm-control">
-          <span>Min market cap</span>
-          <select value={minMcap} onChange={(e) => setMinMcap(Number(e.target.value))}>
-            <option value={0}>All</option>
-            <option value={100e6}>$100M+</option>
-            <option value={500e6}>$500M+</option>
-            <option value={2e9}>$2B+</option>
-            <option value={10e9}>$10B+</option>
-            <option value={50e9}>$50B+</option>
-          </select>
-        </label>
-        <span className="mm-summary">
-          {rows == null
+        <div className="mm-filter-row">
+          <div className="mm-filter-group mm-filter-grow">
+            <div className="mm-filter-label">Sector</div>
+            <select
+              className="mm-sector-select"
+              value={sector}
+              onChange={(e) => setSector(e.target.value)}
+              disabled={!rows}
+            >
+              <option value="">All sectors{rows ? ` (${rows.length})` : ""}</option>
+              {sectors.map((s) => (
+                <option key={s.name} value={s.name}>
+                  {s.name} ({s.count})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="mm-filter-group">
+            <div className="mm-filter-label">Sort</div>
+            <div className="mm-filter-pills">
+              <button
+                type="button"
+                className={`mm-pill ${sortDir === "desc" ? "on" : ""}`}
+                onClick={() => setSortDir("desc")}
+              >
+                Most red flags
+              </button>
+              <button
+                type="button"
+                className={`mm-pill ${sortDir === "asc" ? "on" : ""}`}
+                onClick={() => setSortDir("asc")}
+              >
+                Fewest red flags
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="mm-summary">
+          {visible == null
             ? "Loading…"
-            : `${rows.length.toLocaleString()} of ${total.toLocaleString()} qualifying companies`}
-        </span>
+            : `${visible.length.toLocaleString()} of ${total.toLocaleString()} qualifying companies`}
+        </div>
       </div>
 
       {error ? (
         <div className="error-state">Error: {error}</div>
-      ) : rows == null ? (
+      ) : visible == null ? (
         <div className="loading-state">Loading…</div>
       ) : (
         <div className="mm-table-wrap">
@@ -184,7 +271,7 @@ export function MismanagementPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, i) => <Row key={row.cik} row={row} rank={i + 1} />)}
+              {visible.map((row, i) => <Row key={row.cik} row={row} rank={i + 1} />)}
             </tbody>
           </table>
         </div>
@@ -193,17 +280,8 @@ export function MismanagementPage() {
   );
 }
 
-function FlagLegend() {
-  return (
-    <div className="mm-legend">
-      {FLAGS.map((f) => (
-        <span key={f.id} className="mm-legend-item" title={f.long}>
-          <span className="mm-legend-dot" /> {f.short}
-          <span className="mm-legend-long"> — {f.long}</span>
-        </span>
-      ))}
-    </div>
-  );
+function countFlags(row: MismanagementRow): number {
+  return FLAGS.reduce((n, f) => n + (f.fired(row) ? 1 : 0), 0);
 }
 
 function Row({ row, rank }: { row: MismanagementRow; rank: number }) {

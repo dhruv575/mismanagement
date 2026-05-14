@@ -215,11 +215,20 @@ export const fetchOverview = () => getJSON<OverviewStats>(`/overview`);
 export interface ThirteenDFeedRow extends ThirteenDFiling {
   ticker: string;
   company_name: string;
+  sic_description: string | null;
+  market_cap: number | null;
 }
-export const fetch13DFeed = (limit = 8) =>
-  getJSON<{ count: number; filings: ThirteenDFeedRow[] }>(
-    `/feeds/13d-recent?limit=${limit}`,
+export const fetch13DFeed = (
+  opts: { limit?: number; activeOnly?: boolean; sinceDays?: number } = {},
+) => {
+  const sp = new URLSearchParams();
+  if (opts.limit != null) sp.set("limit", String(opts.limit));
+  if (opts.activeOnly) sp.set("active_only", "1");
+  if (opts.sinceDays != null) sp.set("since_days", String(opts.sinceDays));
+  return getJSON<{ count: number; filings: ThirteenDFeedRow[] }>(
+    `/feeds/13d-recent?${sp.toString()}`,
   );
+};
 
 export interface InsiderBuyRow {
   ticker: string;
