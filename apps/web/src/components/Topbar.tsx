@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { MTSLogo } from "./MTSLogo.js";
 import { TopbarLinks } from "./TopbarLinks.js";
+import { ThemeToggle } from "./ThemeToggle.js";
 
 export function Topbar() {
   return (
@@ -16,6 +17,7 @@ export function Topbar() {
       </nav>
       <div className="topbar-right">
         <TopbarLinks />
+        <ThemeToggle />
       </div>
     </header>
   );

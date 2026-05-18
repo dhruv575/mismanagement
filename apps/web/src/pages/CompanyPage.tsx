@@ -72,7 +72,7 @@ export function CompanyPage() {
       <div className="company">
         <div className="error-state">Couldn't load {ticker}: {error}</div>
         <p style={{ marginTop: 24 }}>
-          <Link to="/screen" className="nav-link" style={{ display: "inline-block" }}>← Back to screen</Link>
+          <Link to="/screen" className="nav-link" style={{ display: "inline-block" }}>Back to screen</Link>
         </p>
       </div>
     );
@@ -289,18 +289,16 @@ function ScorecardHero({
         <header className="share-brand">
           <div className="share-brand-left">
             <MTSLogo size={22} />
-            <span className="share-brand-eyebrow">MTS · MISMANAGEMENT</span>
           </div>
           <span className="share-brand-date">{today}</span>
         </header>
         <section className="share-hero">
           <div className="share-eyebrow">
-            {rank != null ? <span className="share-rank">RANK #{rank}</span> : null}
+            {rank != null ? <span className="share-rank">Rank #{rank}</span> : null}
             {universe ? <span>of {universe.toLocaleString()} R3K</span> : null}
-            {company.sic_description ? <><span>·</span><span>{company.sic_description}</span></> : null}
+            {company.sic_description ? <span>{company.sic_description}</span> : null}
           </div>
-          <div className="share-ticker">{company.ticker}</div>
-          <h1 className="share-name">{company.name}</h1>
+          <h1 className="share-ticker">{company.ticker}</h1>
           <div className="share-chips">
             {company.is_russell_3000 ? <span className="share-chip">Russell 3000</span> : null}
             {company.fiscal_year_end ? <span className="share-chip">FY end {company.fiscal_year_end}</span> : null}
@@ -364,7 +362,7 @@ function ScorecardHero({
           disabled={downloading || !checks}
           aria-label="Download scorecard as PNG"
         >
-          {downloading ? "Rendering…" : "↓ Download card"}
+          {downloading ? "Rendering…" : "Download card"}
         </button>
       </div>
       <article className="ch" ref={cardRef}>
@@ -372,7 +370,6 @@ function ScorecardHero({
       <header className="ch-brand">
         <div className="ch-brand-left">
           <MTSLogo size={18} />
-          <span className="ch-brand-eyebrow">MTS · MISMANAGEMENT</span>
         </div>
         <span className="ch-brand-date">{today}</span>
       </header>
@@ -382,15 +379,14 @@ function ScorecardHero({
         <div className="ch-rank">
           {rank != null ? (
             <>
-              RANK #{rank}
-              {universe ? <span className="ch-rank-of"> · OF {universe.toLocaleString()} TRACKED</span> : null}
+              Rank #{rank}
+              {universe ? <span className="ch-rank-of"> of {universe.toLocaleString()} tracked</span> : null}
             </>
           ) : (
-            <span className="ch-rank-of">MISMANAGEMENT SCORECARD</span>
+            <span className="ch-rank-of">Mismanagement scorecard</span>
           )}
         </div>
         <h1 className="ch-ticker">{company.ticker}</h1>
-        <p className="ch-name">{company.name}</p>
       </section>
 
       {checks ? (
@@ -402,10 +398,7 @@ function ScorecardHero({
               <span>/{checks.length}</span>
             </div>
             <div className="ch-verdict-right">
-              <em className="ch-verdict-text">flags fired</em>
-              <span className="ch-verdict-source">
-                Determined by referencing their 10-K, DEF 14A proxy, Form 4 insider transactions, Schedule 13D, and 8-K Item 5.07 vote results.
-              </span>
+              <span className="ch-verdict-text">flags fired</span>
             </div>
           </section>
 
@@ -508,14 +501,14 @@ function ChSparkDelta({ prices }: { prices: PricePoint[] }) {
   const latest = closes[closes.length - 1]!;
   return (
     <span className="ch-spark-pl">
-      PEAK ${peak.toFixed(0)} → ${latest.toFixed(0)}
+      Peak ${peak.toFixed(0)}, now ${latest.toFixed(0)}
     </span>
   );
 }
 
 function ChSpark({ prices }: { prices: PricePoint[] }) {
   if (prices.length < 2)
-    return <div className="ch-spark-empty">— no price history —</div>;
+    return <div className="ch-spark-empty">No price history</div>;
 
   // Down-sample to ~260 points so 1300-point datasets don't bog the chart.
   const data = sample(prices, 260).map((p) => ({

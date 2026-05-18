@@ -33,7 +33,6 @@ export function HomePage() {
   return (
     <div className="home">
       <section className="home-hero">
-        <p className="hero-eyebrow">MTS · ACTIVIST</p>
         <h1 className="hero-title">Mismanagement, in numbers.</h1>
         <p className="hero-dek">
           Whether or not Ryan Cohen is able to successfully complete his
@@ -49,7 +48,7 @@ export function HomePage() {
       <section className="home-grid-section">
         <header className="home-grid-head">
           <h2 className="home-grid-title">A few candidates</h2>
-          <Link to="/mismanagement" className="home-grid-more">View the full leaderboard →</Link>
+          <Link to="/mismanagement" className="home-grid-more">View the full leaderboard</Link>
         </header>
         {hot == null ? (
           <div className="loading-state">Loading…</div>

@@ -40,16 +40,14 @@ export function PriceSparkline({ data, height = 120 }: Props) {
           display: "flex",
           justifyContent: "space-between",
           marginTop: 6,
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          letterSpacing: "0.12em",
-          textTransform: "uppercase",
+          fontFamily: "var(--font-sans)",
+          fontSize: 12,
           color: "var(--ink-mute)",
         }}
       >
-        <span>${first.toFixed(2)} · {data[0]!.trading_date}</span>
-        <span style={{ color: pct >= 0 ? "var(--pos)" : "var(--neg)" }}>{tag}</span>
-        <span>${last.toFixed(2)} · {data[data.length - 1]!.trading_date}</span>
+        <span><span style={{ fontFamily: "var(--font-mono)" }}>${first.toFixed(2)}</span> {data[0]!.trading_date}</span>
+        <span style={{ color: pct >= 0 ? "var(--pos)" : "var(--neg)", fontFamily: "var(--font-mono)" }}>{tag}</span>
+        <span><span style={{ fontFamily: "var(--font-mono)" }}>${last.toFixed(2)}</span> {data[data.length - 1]!.trading_date}</span>
       </div>
     </div>
   );

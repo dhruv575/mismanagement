@@ -114,7 +114,7 @@ const FLAGS: FlagDef[] = [
       const parts: string[] = [];
       if (sop != null) parts.push(`SoP ${sop.toFixed(0)}%`);
       if (dir != null) parts.push(`min dir ${dir.toFixed(0)}%`);
-      return parts.join(" · ");
+      return parts.join(", ");
     },
   },
 ];
@@ -341,8 +341,8 @@ export function MismanagementPage() {
           {visible == null
             ? "Loading…"
             : visible.length > VISIBLE_CAP
-            ? `Showing top ${VISIBLE_CAP.toLocaleString()} of ${visible.length.toLocaleString()} matches · ${total.toLocaleString()} qualifying at this market cap`
-            : `${visible.length.toLocaleString()} matching · ${total.toLocaleString()} qualifying at this market cap`}
+            ? `Showing top ${VISIBLE_CAP.toLocaleString()} of ${visible.length.toLocaleString()} matches, ${total.toLocaleString()} qualifying at this market cap.`
+            : `${visible.length.toLocaleString()} matching, ${total.toLocaleString()} qualifying at this market cap.`}
         </div>
       </div>
 
@@ -432,7 +432,7 @@ const Row = memo(function Row({ row, rank }: { row: MismanagementRow; rank: numb
       </td>
       <td className="mm-evidence mm-col-evidence">
         {fired.length === 0 ? (
-          <span className="mm-clean">— no flags —</span>
+          <span className="mm-clean">No flags fired</span>
         ) : (
           fired
             .map((f) => f.evidence(row))
