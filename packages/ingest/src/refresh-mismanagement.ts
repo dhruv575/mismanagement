@@ -89,6 +89,55 @@ const SQL = `
     where sop_support_pct is not null or min_director_support_pct is not null
     order by cik, coalesce(meeting_date, filing_date) desc
   ),
+  -- Takeover-attractiveness inputs. EBITDA uses the latest year that has
+  -- operating income, matching the profile endpoint's derivation.
+  ebitda_fy as (
+    select distinct on (oi.cik) oi.cik, oi.value + coalesce(da.value, 0) as ebitda
+    from financial_metrics oi
+    left join financial_metrics da
+      on da.cik = oi.cik and da.fiscal_year = oi.fiscal_year and da.concept = 'depreciation_amortization'
+    where oi.concept = 'operating_income' and oi.fiscal_year > 0
+    order by oi.cik, oi.fiscal_year desc
+  ),
+  debt_pit as (
+    select cik,
+           coalesce(max(value) filter (where concept = 'total_debt_latest'),
+                    max(value) filter (where concept = 'long_term_debt_latest')) as debt,
+           max(value) filter (where concept = 'cash_latest') as cash
+    from financial_metrics
+    where fiscal_year = -1 and concept in ('total_debt_latest','long_term_debt_latest','cash_latest')
+    group by cik
+  ),
+  hc_latest as (
+    select distinct on (cik) cik, employees from headcount
+    where employees > 0 order by cik, fiscal_year desc
+  ),
+  -- Revenue per employee ranked within 2-digit SIC; groups under 8 are too
+  -- thin to call anyone "low for the industry".
+  rpe as (
+    select c.cik, fm.revenue / h.employees as rpe, left(c.sic, 2) as sic2
+    from companies c
+    join hc_latest h on h.cik = c.cik
+    join fm on fm.cik = c.cik
+    where c.sic is not null and fm.revenue > 0
+  ),
+  rpe_ranked as (
+    select cik, rpe,
+           case when count(*) over (partition by sic2) >= 8
+                then percent_rank() over (partition by sic2 order by rpe) end as pctile
+    from rpe
+  ),
+  -- AI mentions in the latest 10-K from the last two years, ranked across
+  -- the whole universe.
+  ai_latest as (
+    select distinct on (cik) cik, ai_term_count::float / word_count * 1e4 as rate
+    from filing_text_signals
+    where word_count > 0 and filing_date >= current_date - interval '2 years'
+    order by cik, filing_date desc
+  ),
+  ai_ranked as (
+    select cik, rate, percent_rank() over (order by rate) as pctile from ai_latest
+  ),
   combined as (
     select c.cik,
       pa.years_under, pa.years_tracked, pa.peo_median,
@@ -119,7 +168,16 @@ const SQL = `
         (vl.sop_support_pct is not null and vl.sop_support_pct < 80)
         or (vl.min_director_support_pct is not null and vl.min_director_support_pct < 80),
         false
-      ) as flag_governance_dissent
+      ) as flag_governance_dissent,
+      rr.rpe as revenue_per_employee, rr.pctile as rpe_industry_pctile,
+      ar.rate as ai_mentions_rate, ar.pctile as ai_rate_pctile,
+      eb.ebitda,
+      case when eb.ebitda > 0 and dp.debt is not null
+           then (dp.debt - coalesce(dp.cash, 0)) / eb.ebitda end as net_debt_to_ebitda,
+      coalesce(rr.pctile < 0.25, false) as signal_low_productivity,
+      coalesce(ar.pctile < 0.25, false) as signal_ai_quiet,
+      coalesce(eb.ebitda > 0 and dp.debt is not null
+        and (dp.debt - coalesce(dp.cash, 0)) < 1.0 * eb.ebitda, false) as signal_debt_capacity
     from companies c
     left join pvp_agg pa on pa.cik = c.cik
     left join pvp_latest pl on pl.cik = c.cik
@@ -128,6 +186,10 @@ const SQL = `
     left join insider_net ind on ind.cik = c.cik
     left join active_13d a13 on a13.cik = c.cik
     left join vote_latest vl on vl.cik = c.cik
+    left join rpe_ranked rr on rr.cik = c.cik
+    left join ai_ranked ar on ar.cik = c.cik
+    left join ebitda_fy eb on eb.cik = c.cik
+    left join debt_pit dp on dp.cik = c.cik
   )
   insert into mismanagement_scores (
     cik, years_under, years_tracked, peo_median,
@@ -138,7 +200,10 @@ const SQL = `
     flag_earnings_cash, flag_dilutive_sbc, flag_returns_over_fcf, flag_goodwill_heavy,
     flag_governance_dissent, latest_sop_support_pct, latest_min_director_support_pct,
     latest_vote_meeting_date,
-    flags_fired, tiebreak, refreshed_at
+    revenue_per_employee, rpe_industry_pctile, ai_mentions_rate, ai_rate_pctile,
+    ebitda, net_debt_to_ebitda,
+    signal_low_productivity, signal_ai_quiet, signal_debt_capacity,
+    flags_fired, signals_fired, tiebreak, refreshed_at
   )
   select
     cik, years_under, years_tracked, peo_median,
@@ -149,6 +214,9 @@ const SQL = `
     flag_earnings_cash, flag_dilutive_sbc, flag_returns_over_fcf, flag_goodwill_heavy,
     flag_governance_dissent, latest_sop_support_pct, latest_min_director_support_pct,
     latest_vote_meeting_date,
+    revenue_per_employee, rpe_industry_pctile, ai_mentions_rate, ai_rate_pctile,
+    ebitda, net_debt_to_ebitda,
+    signal_low_productivity, signal_ai_quiet, signal_debt_capacity,
     (case when flag_tsr_under then 1 else 0 end
       + case when flag_pay_through_it then 1 else 0 end
       + case when flag_active_13d then 1 else 0 end
@@ -159,6 +227,10 @@ const SQL = `
       + case when flag_goodwill_heavy then 1 else 0 end
       + case when flag_governance_dissent then 1 else 0 end
     ) as flags_fired,
+    (case when signal_low_productivity then 1 else 0 end
+      + case when signal_ai_quiet then 1 else 0 end
+      + case when signal_debt_capacity then 1 else 0 end
+    ) as signals_fired,
     (coalesce(latest_peer_tsr, 0) - coalesce(latest_company_tsr, 0)) * coalesce(peo_median, 0) as tiebreak,
     now() as refreshed_at
   from combined

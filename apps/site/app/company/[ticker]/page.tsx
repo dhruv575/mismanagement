@@ -5,7 +5,10 @@ import { app } from "@mismanagement/api";
 import { fmtDate, fmtUsd } from "@/lib/format";
 import { TickerName } from "@/lib/ticker";
 import { SITE_URL } from "@/lib/site";
-import { FLAG_LABELS, FLAG_RULES, flagEvidence, flagMeasure } from "@/lib/flags";
+import {
+  FLAG_LABELS, FLAG_RULES, SIGNAL_LABELS, SIGNAL_RULES,
+  flagEvidence, flagMeasure, signalEvidence, signalMeasure,
+} from "@/lib/flags";
 import { Delta, Meter, Sparkline } from "@/lib/charts";
 
 export const revalidate = 21600;
@@ -19,6 +22,7 @@ type Num = number | null;
 interface Profile {
   company: { ticker: string; name: string; sic: string | null; sic_description: string | null; market_cap: Num; is_russell_3000: boolean };
   flags: string[];
+  signals: string[];
   scores: (Record<string, unknown> & { flags_fired?: number }) | null;
   financials: { years: number[]; series: Record<string, Record<number, number>>; latest: Record<string, number> };
   derived: { fiscal_year: Num; ebitda: Num; net_debt: Num; net_debt_to_ebitda: Num; revenue_per_employee: Num; ai_mentions_per_10k_words: Num };
@@ -146,29 +150,17 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
           Red flags{" "}
           {p.scores && <span className="muted">{p.flags.filter((f) => p.scores![`flag_${f}`] === true).length} of {p.flags.length}</span>}
         </h2>
-        <ul className="flag-grid">
-          {p.flags.map((f) => {
-            const fired = p.scores?.[`flag_${f}`] === true;
-            const ev = p.scores ? flagEvidence(f, p.scores) : null;
-            return (
-              <li key={f} className="flag-cell" data-fired={fired}>
-                <div className="flag-cell-top">
-                  <span>{FLAG_LABELS[f]}</span>
-                  <span className="flag-state">{!p.scores ? "Not scored" : fired ? "Fired" : "Clear"}</span>
-                </div>
-                <div className="flag-value">{ev ?? "—"}</div>
-                {(() => {
-                  const m = p.scores ? flagMeasure(f, p.scores) : null;
-                  return m ? (
-                    <Meter value={m.invert ? m.max - m.value : m.value} threshold={m.invert ? m.max - m.threshold : m.threshold}
-                      max={m.max} fired={fired} label={`${FLAG_LABELS[f]}: ${ev ?? ""}`} />
-                  ) : <div className="meter meter-empty" aria-hidden="true" />;
-                })()}
-                <div className="flag-rule muted">{FLAG_RULES[f]}</div>
-              </li>
-            );
-          })}
-        </ul>
+        <SignalGrid keys={p.flags} prefix="flag_" scores={p.scores}
+          labels={FLAG_LABELS} rules={FLAG_RULES} measure={flagMeasure} evidence={flagEvidence} />
+      </section>
+
+      <section aria-labelledby="signals-h">
+        <h2 id="signals-h">
+          Takeover attractiveness{" "}
+          {p.scores && <span className="muted">{p.signals.filter((f) => p.scores![`signal_${f}`] === true).length} of {p.signals.length}</span>}
+        </h2>
+        <SignalGrid keys={p.signals} prefix="signal_" scores={p.scores} kind="signal"
+          labels={SIGNAL_LABELS} rules={SIGNAL_RULES} measure={signalMeasure} evidence={signalEvidence} />
       </section>
 
         <section id="financials">
@@ -326,4 +318,40 @@ function titleCase(s: string): string {
 // "Dilutive SBC" -> "dilutive SBC": lowercase a leading word, keep acronyms.
 function lowerFirst(s: string): string {
   return /^[A-Z][a-z]/.test(s) ? s[0]!.toLowerCase() + s.slice(1) : s;
+}
+
+type Measure = { value: number; threshold: number; max: number; invert?: boolean } | null;
+
+// One cell per test: state, measured value, meter against the threshold, rule.
+// Red flags and takeover signals share the layout; `kind` sets the color.
+function SignalGrid({ keys, prefix, scores, labels, rules, measure, evidence, kind }: {
+  keys: string[]; prefix: string; scores: Record<string, unknown> | null;
+  labels: Record<string, string>; rules: Record<string, string>;
+  measure: (f: string, s: Record<string, unknown>) => Measure;
+  evidence: (f: string, s: Record<string, unknown>) => string | null;
+  kind?: "signal";
+}) {
+  return (
+    <ul className="flag-grid" data-kind={kind}>
+      {keys.map((f) => {
+        const fired = scores?.[`${prefix}${f}`] === true;
+        const ev = scores ? evidence(f, scores) : null;
+        const m = scores ? measure(f, scores) : null;
+        return (
+          <li key={f} className="flag-cell" data-fired={fired}>
+            <div className="flag-cell-top">
+              <span>{labels[f]}</span>
+              <span className="flag-state">{!scores ? "Not scored" : fired ? (kind ? "Yes" : "Fired") : (kind ? "No" : "Clear")}</span>
+            </div>
+            <div className="flag-value">{ev ?? "—"}</div>
+            {m ? (
+              <Meter value={m.invert ? m.max - m.value : m.value} threshold={m.invert ? m.max - m.threshold : m.threshold}
+                max={m.max} fired={fired} label={`${labels[f]}: ${ev ?? ""}`} />
+            ) : <div className="meter meter-empty" aria-hidden="true" />}
+            <div className="flag-rule muted">{rules[f]}</div>
+          </li>
+        );
+      })}
+    </ul>
+  );
 }

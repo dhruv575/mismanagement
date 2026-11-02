@@ -767,3 +767,18 @@ h1 .tk-name {
     display: none;
   }
 }
+
+/* Takeover signals read as opportunity, not alarm: accent instead of red. */
+.flag-grid[data-kind="signal"] .flag-cell[data-fired="true"] {
+  background: rgba(143, 164, 255, 0.1);
+  border-color: var(--accent-ring);
+}
+.flag-grid[data-kind="signal"] .flag-cell[data-fired="true"] .flag-state {
+  color: var(--accent-bright);
+}
+.flag-grid[data-kind="signal"] .meter[data-fired="true"] {
+  background: rgba(143, 164, 255, 0.14);
+}
+.flag-grid[data-kind="signal"] .meter[data-fired="true"] .meter-fill {
+  background: var(--accent-bright);
+}

@@ -388,6 +388,7 @@ app.get("/companies/:ticker/profile", async (c) => {
   return c.json({
     company: co.rows[0],
     flags: MISMANAGEMENT_FLAGS,
+    signals: TAKEOVER_SIGNALS,
     scores: scores.rows[0] ?? null,
     financials: { years, series, latest },
     derived: {
@@ -440,6 +441,13 @@ const MISMANAGEMENT_FLAGS = [
   "governance_dissent", // 9. Latest SoP support <80% OR any director support <80%
 ] as const;
 
+// Takeover-attractiveness signals, counted separately in signals_fired.
+const TAKEOVER_SIGNALS = [
+  "low_productivity", // Revenue/employee in bottom quartile of 2-digit SIC (8+ peers)
+  "ai_quiet",         // AI mentions per 10K words in bottom quartile of the universe
+  "debt_capacity",    // EBITDA > 0 and net debt < 1x EBITDA
+] as const;
+
 app.get("/mismanagement", async (c) => {
   const minMcap = Number(c.req.query("min_mcap") ?? 500e6);
   const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 100), 1), 3000);
@@ -469,6 +477,7 @@ app.get("/mismanagement", async (c) => {
       ms.flag_returns_over_fcf, ms.flag_goodwill_heavy,
       ms.flag_governance_dissent,
       ms.latest_sop_support_pct, ms.latest_min_director_support_pct,
+      ms.signal_low_productivity, ms.signal_ai_quiet, ms.signal_debt_capacity, ms.signals_fired,
       count(*) over() as total
     from mismanagement_scores ms
     join companies c on c.cik = ms.cik
@@ -516,6 +525,7 @@ app.get("/mismanagement", async (c) => {
     count: r.rows.length,
     total: r.rows[0] ? Number(r.rows[0].total) : 0,
     flags: MISMANAGEMENT_FLAGS,
+    signals: TAKEOVER_SIGNALS,
     distribution: dist.rows.map((d) => ({ flags_fired: Number(d.flags_fired), count: Number(d.n) })),
     refreshed_at: dist.rows.reduce<string | null>((m, d) => (m && m > d.refreshed_at ? m : d.refreshed_at), null),
     rows: slim,

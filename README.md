@@ -24,6 +24,18 @@ It also tracks a newer kind of buyer. AI holding companies (Long Lake, Thrive Ho
 
 Missing inputs never fire a flag. Thresholds are set where a signal is hard to explain away in a single year, not at statistical cutoffs. They live in [`refresh-mismanagement.ts`](packages/ingest/src/refresh-mismanagement.ts).
 
+## Takeover attractiveness
+
+Three more checks ask a different question: not whether a company is badly run, but whether a buyer would want it. They are counted on their own and never added to the red-flag total.
+
+| Signal | Fires when | Source |
+|---|---|---|
+| Low revenue per employee | Bottom quartile of its 2-digit SIC industry (industries with 8+ scored companies) | Revenue (XBRL) ÷ headcount from the 10-K |
+| Quiet on AI | AI mentions per 10K words of the latest 10-K are in the bottom quartile of the universe | 10-K full text |
+| Room to borrow | EBITDA is positive and net debt is under 1× EBITDA | XBRL income statement and balance sheet |
+
+The first two are percentiles, so they recalibrate on every refresh instead of relying on a fixed cutoff.
+
 ## How it works
 
 ```

@@ -307,6 +307,17 @@ const statements = [
   `alter table mismanagement_scores add column if not exists latest_sop_support_pct double precision`,
   `alter table mismanagement_scores add column if not exists latest_min_director_support_pct double precision`,
   `alter table mismanagement_scores add column if not exists latest_vote_meeting_date date`,
+  // Takeover-attractiveness signals: scored separately from the red flags.
+  `alter table mismanagement_scores add column if not exists revenue_per_employee double precision`,
+  `alter table mismanagement_scores add column if not exists rpe_industry_pctile double precision`,
+  `alter table mismanagement_scores add column if not exists ai_mentions_rate double precision`,
+  `alter table mismanagement_scores add column if not exists ai_rate_pctile double precision`,
+  `alter table mismanagement_scores add column if not exists ebitda double precision`,
+  `alter table mismanagement_scores add column if not exists net_debt_to_ebitda double precision`,
+  `alter table mismanagement_scores add column if not exists signal_low_productivity boolean not null default false`,
+  `alter table mismanagement_scores add column if not exists signal_ai_quiet boolean not null default false`,
+  `alter table mismanagement_scores add column if not exists signal_debt_capacity boolean not null default false`,
+  `alter table mismanagement_scores add column if not exists signals_fired int not null default 0`,
 
   // ---- AI take-private screen ----
   // Numeric SIC from the submissions JSON (sic_description already exists).

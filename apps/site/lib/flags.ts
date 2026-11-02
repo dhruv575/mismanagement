@@ -113,3 +113,61 @@ export function flagEvidence(f: string, s: Scores): string | null {
   }
   return null;
 }
+
+// Takeover-attractiveness signals: what makes a company a buyer's target,
+// scored separately from the red flags and never summed with them.
+export const SIGNAL_LABELS: Record<string, string> = {
+  low_productivity: "Low revenue per employee",
+  ai_quiet: "Quiet on AI",
+  debt_capacity: "Room to borrow",
+};
+
+export const SIGNAL_RULES: Record<string, string> = {
+  low_productivity: "Bottom quartile of its SIC industry",
+  ai_quiet: "Bottom quartile of AI mentions in 10-Ks",
+  debt_capacity: "Net debt under 1× EBITDA",
+};
+
+const ordinal = (p: number) => {
+  const v = Math.round(p * 100);
+  const s = v % 100 >= 11 && v % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[v % 10] ?? "th";
+  return `${v}${s}`;
+};
+
+/** Meter position for a signal: percentile signals fire below the 25th. */
+export function signalMeasure(f: string, s: Scores): { value: number; threshold: number; max: number; invert?: boolean } | null {
+  switch (f) {
+    case "low_productivity": {
+      const p = n(s, "rpe_industry_pctile");
+      return p != null ? { value: p, threshold: 0.25, max: 1, invert: true } : null;
+    }
+    case "ai_quiet": {
+      const p = n(s, "ai_rate_pctile");
+      return p != null ? { value: p, threshold: 0.25, max: 1, invert: true } : null;
+    }
+    case "debt_capacity": {
+      const v = n(s, "net_debt_to_ebitda");
+      return v != null ? { value: Math.max(v, 0), threshold: 1, max: 4, invert: true } : null;
+    }
+  }
+  return null;
+}
+
+export function signalEvidence(f: string, s: Scores): string | null {
+  switch (f) {
+    case "low_productivity": {
+      const v = n(s, "revenue_per_employee"), p = n(s, "rpe_industry_pctile");
+      if (v == null) return null;
+      return p != null ? `${fmtUsd(v)} · ${ordinal(p)} pct` : `${fmtUsd(v)} per employee`;
+    }
+    case "ai_quiet": {
+      const v = n(s, "ai_mentions_rate"), p = n(s, "ai_rate_pctile");
+      return v != null && p != null ? `${v.toFixed(1)} per 10K words · ${ordinal(p)} pct` : null;
+    }
+    case "debt_capacity": {
+      const v = n(s, "net_debt_to_ebitda");
+      return v == null ? null : v < 0 ? "Net cash" : `${v.toFixed(1)}× EBITDA`;
+    }
+  }
+  return null;
+}
