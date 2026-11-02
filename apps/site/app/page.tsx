@@ -47,6 +47,7 @@ export default async function Leaderboard() {
         </>
       ) : (
         <>
+          <h1 className="sr-only">Red flags for every Russell 3000 company</h1>
           <section className="summary" aria-label="Summary">
             <div className="hero">
               <div className="hero-value">{heavy.toLocaleString("en-US")}</div>

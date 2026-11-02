@@ -1,8 +1,17 @@
+import type { Metadata } from "next";
 import { api } from "@/lib/api";
 import { TickerName } from "@/lib/ticker";
 import { fmtDate } from "@/lib/format";
 
 export const revalidate = 21600;
+
+export const metadata: Metadata = {
+  title: "Deals",
+  description:
+    "Merger proxies, going-private schedules and tender offers on US public companies, with price, premium and acquirer, " +
+    "including AI-rollup buyers like Long Lake, Thrive Holdings and General Catalyst.",
+  alternates: { canonical: "/deals" },
+};
 
 interface Deal {
   accession_number: string;

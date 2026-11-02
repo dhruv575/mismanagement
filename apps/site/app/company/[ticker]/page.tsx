@@ -1,7 +1,10 @@
+import { cache } from "react";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { app } from "@mismanagement/api";
 import { fmtDate, fmtUsd } from "@/lib/format";
 import { TickerName } from "@/lib/ticker";
+import { SITE_URL } from "@/lib/site";
 import { FLAG_LABELS, FLAG_RULES, flagEvidence, flagMeasure } from "@/lib/flags";
 import { Delta, Meter, Sparkline } from "@/lib/charts";
 
@@ -26,12 +29,13 @@ interface Profile {
   thirteen_d: { accession_number: string; form: string; filing_date: string; filer_name: string; aggregate_percent: Num; is_active_intent: boolean | null }[];
 }
 
-async function getProfile(ticker: string): Promise<Profile | null> {
+// cache(): generateMetadata and the page share one read per request.
+const getProfile = cache(async (ticker: string): Promise<Profile | null> => {
   const res = await app.request(`/api/companies/${encodeURIComponent(ticker)}/profile`);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`profile ${ticker}: ${res.status}`);
   return (await res.json()) as Profile;
-}
+});
 
 const FIN_ROWS: [string, string][] = [
   ["revenue", "Revenue"],
@@ -45,9 +49,34 @@ const FIN_ROWS: [string, string][] = [
 ];
 
 
-export async function generateMetadata({ params }: { params: Promise<{ ticker: string }> }) {
+export async function generateMetadata({ params }: { params: Promise<{ ticker: string }> }): Promise<Metadata> {
   const { ticker } = await params;
-  return { title: `${ticker.toUpperCase()} · Mismanagement` };
+  const p = await getProfile(ticker);
+  if (!p) return { title: ticker.toUpperCase(), robots: { index: false } };
+  const { company: co } = p;
+  const fired = p.scores ? p.flags.filter((f) => p.scores![`flag_${f}`] === true) : [];
+  const flagText = p.scores
+    ? fired.length
+      ? `${fired.length} of ${p.flags.length} red flags: ${fired.map((f) => lowerFirst(FLAG_LABELS[f]!)).join(", ")}.`
+      : `None of the ${p.flags.length} red flags fire.`
+    : "";
+  const fy = p.financials.years.at(-1);
+  const rev = fy != null ? p.financials.series.revenue?.[fy] : undefined;
+  const facts = [
+    rev != null ? `FY${fy} revenue ${fmtUsd(rev)}` : null,
+    p.headcount ? `${p.headcount.employees.toLocaleString("en-US")} employees` : null,
+    p.deals.some((x) => x.form !== "8-K") ? "deal filings on record" : null,
+  ].filter(Boolean).join(", ");
+  const title = `${co.name} (${co.ticker}) red flags`;
+  const description = `${co.name} (${co.ticker}) scorecard from SEC filings. ${flagText}${facts ? ` ${facts[0]!.toUpperCase()}${facts.slice(1)}.` : ""}`;
+  const path = `/company/${co.ticker}`;
+  return {
+    title,
+    description,
+    alternates: { canonical: path },
+    openGraph: { type: "website", url: path, title, description },
+    twitter: { card: "summary_large_image", title, description },
+  };
 }
 
 export default async function CompanyPage({ params }: { params: Promise<{ ticker: string }> }) {
@@ -73,6 +102,19 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
 
   return (
     <main className="page company">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        url: `${SITE_URL}/company/${co.ticker}`,
+        name: `${co.name} (${co.ticker}) red flags`,
+        about: {
+          "@type": "Corporation",
+          name: co.name,
+          tickerSymbol: co.ticker,
+          ...(p.headcount ? { numberOfEmployees: { "@type": "QuantitativeValue", value: p.headcount.employees } } : {}),
+          ...(co.sic_description ? { industry: co.sic_description } : {}),
+        },
+      }) }} />
       <header className="co-head">
         <div className="co-id">
           <h1><TickerName ticker={co.ticker} name={co.name} link={false} /></h1>
@@ -279,4 +321,9 @@ function Fact({ label, value, title }: { label: string; value: string; title?: s
 // EDGAR SIC descriptions are uppercase ("SERVICES-BUSINESS SERVICES, NEC").
 function titleCase(s: string): string {
   return s.toLowerCase().replace(/(^|[\s-])\w/g, (m) => m.toUpperCase()).replace(/\bNec\b/, "NEC");
+}
+
+// "Dilutive SBC" -> "dilutive SBC": lowercase a leading word, keep acronyms.
+function lowerFirst(s: string): string {
+  return /^[A-Z][a-z]/.test(s) ? s[0]!.toLowerCase() + s.slice(1) : s;
 }
