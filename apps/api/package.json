@@ -1,5 +1,5 @@
 {
-  "name": "@activist/api",
+  "name": "@mismanagement/api",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@activist/shared": "workspace:*",
     "@neondatabase/serverless": "^0.10.4",
     "hono": "^4.6.14"
   },
@@ -19,5 +18,8 @@
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "@types/node": "^22.10.2"
+  },
+  "exports": {
+    ".": "./src/index.ts"
   }
 }

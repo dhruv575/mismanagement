@@ -1,10 +1,10 @@
 // Pulls Schedule 13D and 13G filings (active/passive 5%+ stakes) into
-// thirteen_d_filings via DeepSeek V4 Flash.
+// thirteen_d_filings via an LLM (Vercel AI Gateway).
 //
 // 13D/G primary docs are short HTML (~6-30KB text). The fields we want
 // (sole/shared voting + dispositive power, aggregate shares + percent,
 // group members, purpose-of-transaction language) are partly tabular and
-// partly narrative -- doable in one DeepSeek call per filing, ~$0.001 each.
+// partly narrative -- doable in one small-model call per filing, a fraction of a cent each.
 //
 // Active vs passive intent: form-type alone isn't dispositive (13G holders
 // can convert to 13D when intent changes). We extract from the document's
@@ -18,9 +18,9 @@
 
 import { z } from "zod";
 import { pool } from "./db.js";
-import { EDGAR_USER_AGENT, OPENROUTER_MODEL } from "./env.js";
+import { EDGAR_USER_AGENT, LLM_MODEL } from "./env.js";
 import { resolveTargets, type IssuerSeed } from "./issuers.js";
-import { callOpenRouter } from "./openrouter.js";
+import { callLLM } from "./llm.js";
 
 interface Filing {
   accession_number: string;
@@ -30,9 +30,11 @@ interface Filing {
   primary_doc_url: string | null;
 }
 
-const NullableNumber = z.number().nullable();
-const NullableString = z.string().nullable();
-const NullableBool = z.boolean().nullable();
+// .default(null): smaller models omit keys they have no value for instead of
+// writing null; treat an omitted key as null.
+const NullableNumber = z.number().nullable().default(null);
+const NullableString = z.string().nullable().default(null);
+const NullableBool = z.boolean().nullable().default(null);
 
 const ThirteenDExtraction = z.object({
   filer_name: z.string(),
@@ -174,7 +176,7 @@ async function extractOne(filing: Filing, issuerName: string): Promise<ThirteenD
     `\n\n=== FILING TEXT ===\n` +
     text;
 
-  const { json } = await callOpenRouter({ systemPrompt: SYSTEM_PROMPT, userPrompt });
+  const { json } = await callLLM({ systemPrompt: SYSTEM_PROMPT, userPrompt });
   return ThirteenDExtraction.parse(json);
 }
 
@@ -226,7 +228,7 @@ async function persist(filing: Filing, extracted: ThirteenDExtraction, raw: unkn
       extracted.sole_dispositive_power,
       extracted.shared_dispositive_power,
       extracted.group_members,
-      OPENROUTER_MODEL,
+      LLM_MODEL,
       JSON.stringify(raw),
     ],
   );
@@ -234,7 +236,7 @@ async function persist(filing: Filing, extracted: ThirteenDExtraction, raw: unkn
 
 async function pullOne(issuer: IssuerSeed, opts: { since?: string; limit?: number; force: boolean }): Promise<{ pulled: number; failures: number }> {
   const params: unknown[] = [issuer.cik];
-  let where = "f.cik = $1 and f.form like 'SC 13%'";
+  let where = "f.cik = $1 and (f.form like 'SC 13%' or f.form like 'SCHEDULE 13%')";
   if (opts.since) {
     params.push(opts.since);
     where += ` and f.filing_date >= $${params.length}::date`;
@@ -288,7 +290,7 @@ async function main(): Promise<void> {
   const tickers = argv.filter((a) => !a.startsWith("--"));
   const targets = await resolveTargets(tickers);
 
-  // Global filing-level queue (was: per-issuer pool). OpenRouter calls
+  // Global filing-level queue (was: per-issuer pool). LLM calls
   // dominate runtime; iterating empty-13D issuers serially wastes worker
   // time, and most R3K issuers have zero 13D activity. One SELECT across
   // all CIKs + a flat N-worker pool keeps the LLM pipeline saturated.
@@ -296,7 +298,7 @@ async function main(): Promise<void> {
   const nameByCik = new Map(targets.map((t) => [t.cik, t.name]));
   const tickerByCik = new Map(targets.map((t) => [t.cik, t.ticker]));
   const params: unknown[] = [ciks];
-  let where = "f.cik = any($1::text[]) and f.form like 'SC 13%'";
+  let where = "f.cik = any($1::text[]) and (f.form like 'SC 13%' or f.form like 'SCHEDULE 13%')";
   if (since) {
     params.push(since);
     where += ` and f.filing_date >= $${params.length}::date`;

@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .turbo/
+.next/
 *.log
 *.tsbuildinfo
 
@@ -25,8 +26,3 @@ Thumbs.db
 # demand and write fetched EDGAR HTML/JSON + failure dumps here. The
 # deployed app reads only Neon, so none of this belongs in the repo.
 data/
-
-# Python prototypes -- artifacts of stage 1/2 design work, source kept under
-# scripts/ but byproducts are not tracked.
-__pycache__/
-*.pyc

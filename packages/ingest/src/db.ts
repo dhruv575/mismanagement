@@ -17,7 +17,7 @@ export const pool = new Pool({
 // Neon's WebSocket connections drop occasionally on long-running scripts.
 // Without a pool-level error handler, an emitted "error" event on an idle
 // client is uncaught and kills the whole process (we saw this on
-// extract-proxy after ~275 successful issuers). The pool reconnects for
+// a long ingest run after ~275 issuers). The pool reconnects for
 // subsequent queries on its own — we just need to swallow + log here.
 pool.on("error", (err) => {
   console.error(`[db] idle client error (auto-reconnect on next query):`, err.message);

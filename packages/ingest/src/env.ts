@@ -14,19 +14,14 @@ function required(name: string): string {
 }
 
 export const DATABASE_URL = required("DATABASE_URL");
-export const OPENROUTER_API_KEY = required("OPENROUTER_API_KEY");
-// Default to DeepSeek V4 Flash for text-only extraction (proxy narrative
-// sections, 13D filings, transcripts). 1M context, fast + cheap. For vision
-// tasks (rendered PDFs etc.) callers override with the Gemini model below.
-export const OPENROUTER_MODEL =
-  process.env.OPENROUTER_MODEL || "deepseek/deepseek-v4-flash";
-
-// Vision tasks (rendered PDF pages, page images, etc.) -- the same model the
-// UFO project uses for multimodal page extraction. Pass explicitly via
-// `callOpenRouter({ model: VLM_MODEL })` at the call site.
-export const VLM_MODEL =
-  process.env.OPENROUTER_VLM_MODEL || "google/gemini-3-flash-preview";
+// LLM extraction (13D filings, 8-K vote results) goes through Vercel AI
+// Gateway's OpenAI-compatible endpoint. The key is required lazily so the
+// deterministic pulls run without one.
+export function aiGatewayApiKey(): string {
+  return required("AI_GATEWAY_API_KEY");
+}
+export const LLM_MODEL = process.env.LLM_MODEL || "mistral/mistral-nemo";
 export const EDGAR_USER_AGENT =
-  process.env.EDGAR_USER_AGENT || "Activist Investing Research contact@example.com";
+  process.env.EDGAR_USER_AGENT || "Mismanagement contact@example.com";
 export const REPO_ROOT = repoRoot;
 export const DATA_DIR = path.join(repoRoot, "data");

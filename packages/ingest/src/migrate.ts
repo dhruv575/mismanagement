@@ -1,17 +1,11 @@
-// Creates the database schema. Idempotent.
+// Creates the database schema. Idempotent: safe to run on every deploy.
 //
-// Two layers:
-//   1. Source-of-truth tables -- companies, filings, financial_metrics,
-//      price_history, proxy_extractions. Everything we pulled from EDGAR /
-//      Yahoo / OpenRouter, stored verbatim.
-//   2. Normalized facts pulled out of proxy_extractions for query performance:
-//      summary_compensation, all_other_compensation, pay_vs_performance,
-//      directors, equity_ownership, related_party_transactions,
-//      compensation_consultants. Backfilled by extract-proxy.ts after each VLM call.
-//
-// We deliberately do NOT create a `red_flags` or `governance_signals` table.
-// The screening UI computes comparisons (e.g. company_tsr vs peer_tsr) at
-// query time and shows the numbers; characterization is left to the reader.
+// Source tables hold what the ingest scripts pull, close to verbatim
+// (companies, filings, financial_metrics, price_history, ixbrl_facts,
+// insider_transactions, thirteen_d_filings, shareholder_votes, deal_filings,
+// headcount, filing_text_signals). mismanagement_scores is the one derived
+// table, materialized by refresh-mismanagement.ts so the API never runs the
+// scoring CTEs at request time.
 
 import { pool } from "./db.js";
 
@@ -28,9 +22,9 @@ const statements = [
   )`,
   `create unique index if not exists companies_ticker_idx on companies (ticker)`,
 
-  // Every SEC filing we know about. Populated by pull-edgar.ts from the
-  // submissions JSON. We only persist filings, not their bodies -- the body
-  // for a DEF 14A goes into proxy_extractions when extracted.
+  // Index of the SEC filings the screens read, from the submissions JSON.
+  // Metadata only (bodies are fetched on demand), and windowed per form type
+  // by pull-edgar.ts to keep storage bounded.
   `create table if not exists filings (
     accession_number text primary key,
     cik text not null references companies(cik) on delete cascade,
@@ -81,118 +75,14 @@ const statements = [
     primary key (ticker, trading_date)
   )`,
 
-  // Raw proxy extraction JSON, one row per (filing, extraction run). Keeping
-  // history lets us re-run with a newer model and diff. The `_meta` block
-  // from the VLM is folded into the dedicated columns.
-  `create table if not exists proxy_extractions (
-    id bigserial primary key,
-    accession_number text not null references filings(accession_number) on delete cascade,
-    cik text not null,
-    fiscal_year_covered smallint not null,
-    model text not null,
-    extracted_at timestamptz not null default now(),
-    raw_json jsonb not null,
-    prompt_tokens int,
-    completion_tokens int
-  )`,
-  `create index if not exists proxy_extractions_accn_idx on proxy_extractions (accession_number, extracted_at desc)`,
-  `create unique index if not exists proxy_extractions_cik_fy_uq on proxy_extractions (cik, fiscal_year_covered)`,
-
-  // Normalized fact tables. One row per fact per extraction. They're
-  // truncated and rebuilt for an issuer each time we re-extract its proxy,
-  // so the surface table is always consistent with the latest extraction.
-  `create table if not exists summary_compensation (
-    extraction_id bigint not null references proxy_extractions(id) on delete cascade,
-    name text not null,
-    title text not null,
-    fiscal_year smallint not null,
-    salary double precision,
-    bonus double precision,
-    stock_awards double precision,
-    option_awards double precision,
-    non_equity_incentive double precision,
-    change_in_pension double precision,
-    all_other_compensation double precision,
-    total double precision,
-    primary key (extraction_id, name, fiscal_year)
-  )`,
-
-  `create table if not exists all_other_compensation (
-    extraction_id bigint not null references proxy_extractions(id) on delete cascade,
-    name text not null,
-    fiscal_year smallint not null,
-    category text not null,
-    amount double precision,
-    description text
-  )`,
-  `create index if not exists all_other_comp_extr_idx on all_other_compensation (extraction_id)`,
-
-  `create table if not exists pay_vs_performance (
-    extraction_id bigint not null references proxy_extractions(id) on delete cascade,
-    year smallint not null,
-    ceo_compensation_actually_paid double precision,
-    average_neo_compensation_actually_paid double precision,
-    company_tsr_indexed double precision,
-    peer_group_tsr_indexed double precision,
-    gaap_net_income double precision,
-    company_selected_measure_name text,
-    company_selected_measure_value double precision,
-    primary key (extraction_id, year)
-  )`,
-
-  `create table if not exists directors (
-    extraction_id bigint not null references proxy_extractions(id) on delete cascade,
-    name text not null,
-    age smallint,
-    director_since_year smallint,
-    independent boolean,
-    is_chair boolean,
-    is_lead_independent_director boolean,
-    committees text[],
-    other_public_boards text[],
-    attendance_below_75pct boolean,
-    primary key (extraction_id, name)
-  )`,
-
-  `create table if not exists director_compensation (
-    extraction_id bigint not null references proxy_extractions(id) on delete cascade,
-    name text not null,
-    fees_earned_or_paid_in_cash double precision,
-    stock_awards double precision,
-    option_awards double precision,
-    non_equity_incentive double precision,
-    all_other_compensation double precision,
-    total double precision,
-    primary key (extraction_id, name)
-  )`,
-
-  `create table if not exists equity_ownership (
-    extraction_id bigint not null references proxy_extractions(id) on delete cascade,
-    name text not null,
-    holder_type text not null,
-    shares double precision,
-    percent_class double precision,
-    primary key (extraction_id, name, holder_type)
-  )`,
-
-  `create table if not exists related_party_transactions (
-    extraction_id bigint not null references proxy_extractions(id) on delete cascade,
-    description text not null,
-    parties text[],
-    amount_or_terms text
-  )`,
-
-  `create table if not exists compensation_consultants (
-    extraction_id bigint not null references proxy_extractions(id) on delete cascade,
-    name text not null,
-    scope text,
-    fees_paid double precision
-  )`,
+  // Legacy LLM proxy-extraction tables (replaced by deterministic XBRL
+  // ingest). Dropped so existing databases match a fresh one.
+  `drop table if exists compensation_consultants, related_party_transactions, equity_ownership,
+     director_compensation, directors, pay_vs_performance, all_other_compensation,
+     summary_compensation, proxy_extractions`,
 
   // Deterministic Pay-vs-Performance facts pulled from companyfacts JSON
-  // (ecd: namespace). One row per (cik, fiscal_year). Authoritative -- the
-  // LLM-sourced pay_vs_performance table is a fallback for filers whose
-  // proxies haven't tagged the table yet.
+  // (ecd: namespace). One row per (cik, fiscal_year).
   //
   // Concepts mapped:
   //   ecd:PeoTotalCompAmt                       -> peo_total_comp
@@ -267,7 +157,7 @@ const statements = [
   `create index if not exists insider_tx_cik_date_idx on insider_transactions (cik, transaction_date desc)`,
   `create index if not exists insider_tx_insider_idx on insider_transactions (insider_name, transaction_date desc)`,
 
-  // Schedule 13D / 13G filings extracted via DeepSeek. One row per filing.
+  // Schedule 13D / 13G filings extracted by LLM (see pull-13d.ts). One row per filing.
   // Sole / shared voting + dispositive power are the SEC's standard fields
   // from Item 5; group_members captures Item 2 disclosure.
   `create table if not exists thirteen_d_filings (
@@ -417,6 +307,50 @@ const statements = [
   `alter table mismanagement_scores add column if not exists latest_sop_support_pct double precision`,
   `alter table mismanagement_scores add column if not exists latest_min_director_support_pct double precision`,
   `alter table mismanagement_scores add column if not exists latest_vote_meeting_date date`,
+
+  // ---- AI take-private screen ----
+  // Numeric SIC from the submissions JSON (sic_description already exists).
+  `alter table companies add column if not exists sic text`,
+
+  // Deal-process filings against an issuer: merger proxies, going-private
+  // schedules, tender offers, and Item 1.01 8-Ks naming a known AI-rollup
+  // buyer. acquirer is parsed from the "Parent is an affiliate of ..."
+  // sentence; matched_buyer is the full-text-search term that found it (a
+  // mention, not attribution). Price/premium are parsed and may be NULL.
+  `create table if not exists deal_filings (
+    accession_number text primary key,
+    cik text not null references companies(cik) on delete cascade,
+    form text not null,
+    filing_date date not null,
+    acquirer text,
+    price_per_share double precision,
+    premium_pct double precision,
+    document_url text not null,
+    refreshed_at timestamptz not null default now()
+  )`,
+  `create index if not exists deal_filings_cik_idx on deal_filings (cik, filing_date desc)`,
+  `alter table deal_filings add column if not exists matched_buyer text`,
+
+  // Headcount from the 10-K human-capital section. Not XBRL-tagged by
+  // filers, so it's regex-parsed; matched_text keeps the source sentence.
+  `create table if not exists headcount (
+    cik text not null references companies(cik) on delete cascade,
+    fiscal_year int not null,
+    employees int not null,
+    matched_text text not null,
+    accession_number text not null,
+    primary key (cik, fiscal_year)
+  )`,
+
+  // Deterministic text counts per 10-K (e.g. AI/automation mentions).
+  `create table if not exists filing_text_signals (
+    accession_number text primary key,
+    cik text not null references companies(cik) on delete cascade,
+    filing_date date not null,
+    word_count int not null,
+    ai_term_count int not null
+  )`,
+  `create index if not exists filing_text_signals_cik_idx on filing_text_signals (cik, filing_date desc)`,
 ];
 
 for (const stmt of statements) {

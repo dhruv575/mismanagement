@@ -1,6 +1,6 @@
 // Recompute the mismanagement_scores table from primary sources. Run this
 // after any ingest that changes the underlying data (pull-ecd, pull-form4,
-// pull-13d, pull-ixbrl, extract-proxy) or on a daily cron.
+// pull-13d, pull-ixbrl, pull-votes) or on a daily cron.
 //
 // The pipeline is the same CTE chain the API used to run on every
 // /mismanagement request — but here we run it once and write the result.
@@ -8,7 +8,7 @@
 // is sub-100ms even cold.
 //
 // Invocation:
-//   pnpm --filter @activist/ingest exec tsx src/refresh-mismanagement.ts
+//   pnpm refresh
 
 import { pool } from "./db.js";
 

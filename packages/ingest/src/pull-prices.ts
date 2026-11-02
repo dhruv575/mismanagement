@@ -8,7 +8,7 @@
 // CLI:
 //   tsx src/pull-prices.ts                 # all issuers
 //   tsx src/pull-prices.ts ETSY EBAY       # subset
-//   tsx src/pull-prices.ts --range=5y      # default 10y
+//   tsx src/pull-prices.ts --range=5y      # default 2y (storage budget; nothing reads older)
 
 import { pool } from "./db.js";
 import { resolveTargets, type IssuerSeed } from "./issuers.js";
@@ -49,13 +49,16 @@ async function pullOne(issuer: IssuerSeed, range: string): Promise<void> {
      on conflict (ticker, trading_date) do update set adj_close = excluded.adj_close`,
     [issuer.ticker, dates, closes],
   );
+  // Rolling window: drop rows older than this pull's range so the table
+  // stays a fixed size (autovacuum reuses the space).
+  await pool.query(`delete from price_history where ticker = $1 and trading_date < $2::date`, [issuer.ticker, dates[0]]);
 
   console.log(`[${issuer.ticker}] ${dates.length} rows (${dates[0]} -> ${dates[dates.length - 1]})`);
 }
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
-  const range = argv.find((a) => a.startsWith("--range="))?.split("=")[1] ?? "10y";
+  const range = argv.find((a) => a.startsWith("--range="))?.split("=")[1] ?? "2y";
   const concurrency = parseInt(argv.find((a) => a.startsWith("--concurrency="))?.split("=")[1] ?? "1", 10);
   const skipExisting = argv.includes("--skip-existing");
   const tickers = argv.filter((a) => !a.startsWith("--"));

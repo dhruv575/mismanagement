@@ -1,111 +1,88 @@
-# activist-investing
+# Mismanagement
 
-Editorial screening tool over public-company financial filings. Pulls SEC
-EDGAR XBRL + Yahoo Finance + DEF 14A proxy extractions into a single Postgres
-database, surfaces them as a quantitative reader-facing site.
+Red flags for every Russell 3000 company, computed from SEC filings.
 
-The premise: an activist-style screen ("which boards look ripe for an Elliott
-or Cohen letter") can be built almost entirely from filings every public
-company is already required to publish. This repo builds that screen and
-shows the underlying numbers; readers draw their own conclusions.
+**[mismanagement.droov.info](https://mismanagement.droov.info)**
 
-## Layout
+Mismanagement scores each company on nine yes/no checks that an activist investor might raise in a letter to the board: shareholder returns that trail peers, CEO pay that climbs anyway, payouts the business can't fund, and so on. Every check is a threshold on numbers the company itself reported to the SEC. The site shows the number behind each flag next to the rule it was tested against, and leaves the judgment to the reader.
 
-```
-activist-investing/
-├── api/[[...path]].ts            # Vercel Edge entry -- re-exports the Hono app
-├── apps/
-│   ├── api/                       # Hono API (src/index.ts exports `app`)
-│   └── web/                       # (deferred) Vite + React reader UI
-├── packages/
-│   ├── shared/                    # Zod schemas + TS types
-│   └── ingest/
-│       ├── src/migrate.ts         # Postgres schema, idempotent
-│       ├── src/pull-edgar.ts      # SEC submissions + companyfacts JSON
-│       ├── src/pull-prices.ts     # Yahoo Finance daily adjusted close
-│       ├── src/extract-proxy.ts   # DEF 14A -> structured JSON via Gemini 3 Flash
-│       └── src/screen.ts          # Stage-1 quant report
-├── scripts/                       # Python prototypes used to design the pipeline
-│   ├── stage1_etsy.py
-│   └── stage2_etsy.py
-└── data/                          # cached EDGAR HTML + extraction JSON (gitignored)
-```
+It also tracks a newer kind of buyer. AI holding companies (Long Lake, Thrive Holdings, General Catalyst's roll-ups) have started taking public, labor-heavy services companies private. Deal filings, headcount, revenue per employee, debt capacity and how often a 10-K mentions AI are pulled alongside the flags.
 
-## Local setup
+## The nine flags
 
-1. Create a Neon project at <https://console.neon.tech>, copy the connection string into `.env`:
+| Flag | Fires when | Source |
+|---|---|---|
+| TSR below peers | Total shareholder return trails the company's own peer group in 3+ of the last 5 years | Pay-versus-performance table (XBRL) |
+| High CEO pay despite TSR | Median CEO pay ≥ $15M while the TSR flag fires | Pay-versus-performance table (XBRL) |
+| Active 13D | An active-intent Schedule 13D in the last 18 months | Schedule 13D |
+| Net insider selling | Open-market insider sales exceed purchases by more than $10M over 12 months | Form 4 |
+| Earnings not backed by cash | Operating cash flow under 80% of positive net income | 10-K (XBRL) |
+| Dilutive SBC | Stock-based compensation over 10% of revenue | 10-K (XBRL) |
+| Payouts exceed cash flow | Buybacks plus dividends exceed operating cash flow | 10-K (XBRL) |
+| Goodwill-heavy | Goodwill over 40% of total assets | 10-K (XBRL) |
+| Shareholder dissent | Say-on-pay or any director under 80% support at the last annual meeting | 8-K Item 5.07 |
 
-   ```
-   cp .env.example .env
-   # edit DATABASE_URL and OPENROUTER_API_KEY
-   ```
+Missing inputs never fire a flag. Thresholds are set where a signal is hard to explain away in a single year, not at statistical cutoffs. They live in [`refresh-mismanagement.ts`](packages/ingest/src/refresh-mismanagement.ts).
 
-2. Install deps and migrate:
-
-   ```
-   pnpm install
-   pnpm migrate
-   ```
-
-3. Pull data:
-
-   ```
-   pnpm pull-edgar           # all issuers in packages/ingest/src/issuers.ts
-   pnpm pull-prices
-   pnpm extract-proxy        # cost ~$0.03 per issuer via OpenRouter
-   ```
-
-   Each script is idempotent and safe to re-run. To target a single ticker:
-
-   ```
-   pnpm pull-edgar ETSY
-   pnpm extract-proxy --force ETSY
-   ```
-
-4. Run the API:
-
-   ```
-   pnpm dev
-   ```
-
-   The Hono app listens on `http://localhost:5051/api`.
-
-## Data flow
+## How it works
 
 ```
-SEC EDGAR submissions JSON   ┐
-SEC EDGAR companyfacts JSON  ├──> pull-edgar.ts ──> companies, filings, financial_metrics
-                             │
-Yahoo Finance chart API ─────┴──> pull-prices.ts ──> price_history
-
-DEF 14A HTML ──> extract-proxy.ts ──> proxy_extractions (raw JSON)
-                                      └─> summary_compensation,
-                                          all_other_compensation,
-                                          pay_vs_performance,
-                                          directors,
-                                          director_compensation,
-                                          equity_ownership,
-                                          related_party_transactions,
-                                          compensation_consultants
+SEC EDGAR ─┐                                         ┌─ apps/site (Next.js)
+Yahoo      ├─> packages/ingest ─> Postgres (Neon) ─> ├─ apps/api  (Hono)
+Finance   ─┘   pull-*.ts             │               │
+                                     └─ refresh-mismanagement.ts
+                                        (materializes the scores)
 ```
 
-The proxy extraction uses **Gemini 3 Flash via OpenRouter** with the
-JSON schema embedded in the prompt and a tolerant parser (same pattern as the
-UFO project's `openrouter.ts`). One DEF 14A averages ~150K input tokens / 5–7K
-output tokens, ~$0.025–0.030 per extraction.
+- **`packages/ingest`**: idempotent scripts that pull SEC submissions, XBRL company facts, inline-XBRL pay-versus-performance data, Form 4s, 13D/13Gs, 8-K vote results and merger filings into Postgres. Everything is parsed deterministically except two filing types with no fixed layout, 13D/13G cover pages and 8-K vote tallies, which go through a small LLM ([Mistral Nemo](https://mistral.ai) via [Vercel AI Gateway](https://vercel.com/ai-gateway)) with schema validation.
+- **`apps/api`**: a [Hono](https://hono.dev) read API over the database.
+- **`apps/site`**: the [Next.js](https://nextjs.org) site. Pages are rendered on the server, cached for six hours, and call the API in-process rather than over HTTP.
 
-## What this does *not* do
+The tables and the concept behind each column are documented in [`docs/data-model.md`](docs/data-model.md).
 
-The schema captures *facts*, not interpretation. There is no `red_flags`
-column, no `governance_score`, no activist-thesis text. Comparisons (company
-TSR vs peer TSR, opex/revenue, comp ratio percentile within peer group) are
-computed at query time and surfaced as numbers; characterization is the
-reader's job.
+## Running it locally
 
-## Python prototypes
+Requires Node 20+ and [pnpm](https://pnpm.io).
 
-`scripts/stage1_etsy.py` and `scripts/stage2_etsy.py` are the design-time
-spike that became this pipeline. They run standalone (no Postgres, just stdout
-+ a `data/` folder of cached JSON) and stay around as a reference -- handy
-when iterating on prompt or schema changes without paying the full pnpm/Turbo
-cycle.
+```sh
+pnpm install
+cp .env.example .env          # set DATABASE_URL; AI_GATEWAY_API_KEY is only needed for pull-13d / pull-votes
+pnpm migrate
+```
+
+Fill the database. Each step is safe to re-run.
+
+```sh
+pnpm pull-universe            # Russell 3000 constituents + every SEC-registered ticker
+pnpm pull-edgar               # filings index + XBRL financials
+pnpm pull-prices              # two years of adjusted daily closes
+pnpm pull-ecd                 # pay-versus-performance (XBRL)
+pnpm pull-ixbrl               # inline-XBRL facts from proxies
+pnpm pull-form4               # insider transactions
+pnpm pull-13d                 # 13D/13G cover-page facts (LLM)
+pnpm pull-votes               # annual-meeting vote results (LLM)
+pnpm pull-deals               # merger proxies, headcount, 10-K text signals
+pnpm pull-deals --buyers      # full-text search for AI-rollup buyers
+pnpm fill-market-cap
+pnpm refresh                  # recompute mismanagement_scores
+```
+
+Any pull takes tickers to limit its run (`pnpm pull-edgar ADT CBZ`). Then start the site:
+
+```sh
+cp .env apps/site/.env.local
+pnpm dev                      # http://localhost:3000
+```
+
+A full first pull of the Russell 3000 takes a few hours, mostly to stay within EDGAR's ten-requests-per-second limit. The database stays around 300 MB because ingest keeps only the window each screen reads (see [storage windows](docs/data-model.md#storage-windows)).
+
+## Caveats
+
+- Filings report what happened, not why. A fired flag is a question to ask, not a conclusion.
+- XBRL tagging varies between filers. A company that tags a concept unusually may show a gap rather than a value.
+- Headcount, deal terms and acquirers are parsed from filing text and can miss unusual phrasing. Each value links back to its source filing.
+- Nothing here is investment advice.
+
+## License
+
+[MIT](LICENSE)

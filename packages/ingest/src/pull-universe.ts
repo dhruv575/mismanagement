@@ -26,14 +26,11 @@ interface SecTicker {
 
 const SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json";
 
-// iShares' deep-link to the IWV holdings CSV. The URL pattern has been
-// stable for years, but iShares occasionally changes the trailing numeric
-// path token. If this 404s, navigate to
-// https://www.ishares.com/us/products/239714/ishares-russell-3000-etf and
-// download the CSV manually -- the URL is the same shape we hit here.
+// iShares' link to the IWV holdings CSV (the "holdings-csv-link" anchor on
+// https://www.ishares.com/us/products/239714/ishares-russell-3000-etf).
+// The older `<token>.ajax?fileType=csv` URL now returns the HTML page.
 const IWV_HOLDINGS_URL =
-  "https://www.ishares.com/us/products/239714/ishares-russell-3000-etf/" +
-  "1467271812596.ajax?fileType=csv&fileName=IWV_holdings&dataType=fund";
+  "https://www.ishares.com/us/products/239714/ishares-russell-3000-etf/latest-holdings.csv";
 
 async function fetchSecTickers(): Promise<Map<string, SecTicker>> {
   const res = await fetch(SEC_TICKERS_URL, {

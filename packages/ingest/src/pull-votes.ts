@@ -1,5 +1,5 @@
 // Pulls shareholder vote results from 8-K Item 5.07 filings into the
-// shareholder_votes table via DeepSeek V4 Flash.
+// shareholder_votes table via an LLM (Vercel AI Gateway).
 //
 // Item 5.07 8-Ks are short (typically <30KB of HTML text) and list each
 // proposal voted on at the annual meeting with For / Against / Abstain /
@@ -24,9 +24,9 @@
 
 import { z } from "zod";
 import { pool } from "./db.js";
-import { EDGAR_USER_AGENT, OPENROUTER_MODEL } from "./env.js";
+import { EDGAR_USER_AGENT, LLM_MODEL } from "./env.js";
 import { resolveTargets, type IssuerSeed } from "./issuers.js";
-import { callOpenRouter } from "./openrouter.js";
+import { callLLM } from "./llm.js";
 
 interface Filing {
   accession_number: string;
@@ -35,8 +35,10 @@ interface Filing {
   primary_doc_url: string | null;
 }
 
-const NullableNumber = z.number().nullable();
-const NullableString = z.string().nullable();
+// .default(null): smaller models omit keys they have no value for instead of
+// writing null; treat an omitted key as null.
+const NullableNumber = z.number().nullable().default(null);
+const NullableString = z.string().nullable().default(null);
 
 const Proposal = z.object({
   proposal_type: z.enum([
@@ -183,7 +185,7 @@ async function extractOne(filing: Filing, issuerName: string): Promise<VoteExtra
     `\n\n=== FILING TEXT ===\n` +
     text;
 
-  const { json } = await callOpenRouter({ systemPrompt: SYSTEM_PROMPT, userPrompt });
+  const { json } = await callLLM({ systemPrompt: SYSTEM_PROMPT, userPrompt });
   return VoteExtraction.parse(json);
 }
 
@@ -284,7 +286,7 @@ async function persist(filing: Filing, ext: VoteExtraction, d: Derived): Promise
       d.worst_director_name,
       d.sop_frequency_chosen,
       JSON.stringify(ext.proposals),
-      OPENROUTER_MODEL,
+      LLM_MODEL,
     ],
   );
 }

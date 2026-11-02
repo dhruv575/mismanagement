@@ -286,28 +286,37 @@ async function pullOne(issuer: IssuerSeed, opts: { fullHistory: boolean; eftsBac
     [issuer.cik, issuer.ticker, sub.name, sub.sicDescription, sub.fiscalYearEnd],
   );
 
-  // Keep just the filings we'll plausibly need: 10-K, 10-Q, DEF 14A, 8-K
-  // Item 5.02 (we filter that downstream), Form 4, 13D, 13G. This keeps the
-  // table size tractable -- a typical issuer has 500-2000 lifetime filings.
-  const RELEVANT_FORMS = new Set([
-    "10-K",
-    "10-K/A",
-    "10-Q",
-    "10-Q/A",
-    "DEF 14A",
-    "DEFA14A",
-    "8-K",
-    "4",
-    "SC 13D",
-    "SC 13D/A",
-    "SC 13G",
-    "SC 13G/A",
-  ]);
+  // Keep just the filings a screen reads, inside the window it reads them.
+  // Neon's free plan caps storage at 1 GB; full lifetime history of Form 4s
+  // and 8-Ks alone blew past it. Each form gets a floor date, and 8-Ks are
+  // kept only for vote results (5.07) and material agreements (1.01).
+  // 13D/G carry both naming eras: "SC 13D" before Dec 2024, "SCHEDULE 13D" after.
+  const FORM4_FLOOR = new Date(Date.now() - 2 * 365 * 864e5).toISOString().slice(0, 10);
+  const FORM_FLOORS: Record<string, string> = {
+    "10-K": "2019-01-01",
+    "10-K/A": "2019-01-01",
+    "DEF 14A": "2019-01-01",
+    "8-K": "2020-01-01",
+    "4": FORM4_FLOOR,
+    "SC 13D": "2019-01-01",
+    "SC 13D/A": "2019-01-01",
+    "SC 13G": "2019-01-01",
+    "SC 13G/A": "2019-01-01",
+    "SCHEDULE 13D": "2019-01-01",
+    "SCHEDULE 13D/A": "2019-01-01",
+    "SCHEDULE 13G": "2019-01-01",
+    "SCHEDULE 13G/A": "2019-01-01",
+  };
+  const KEPT_8K_ITEMS = ["5.07", "1.01"];
 
   const r = sub.filings;
   const filings = r.form
     .map((form, i) => ({ form, i }))
-    .filter(({ form }) => RELEVANT_FORMS.has(form))
+    .filter(({ form, i }) => {
+      const floor = FORM_FLOORS[form];
+      if (!floor || r.filingDate[i]! < floor) return false;
+      return form !== "8-K" || KEPT_8K_ITEMS.some((it) => (r.items?.[i] ?? "").includes(it));
+    })
     .map(({ form, i }) => {
       const filingDate = r.filingDate[i]!;
       const reportDate = r.reportDate[i] || null;
@@ -336,6 +345,10 @@ async function pullOne(issuer: IssuerSeed, opts: { fullHistory: boolean; eftsBac
         items,
       };
     });
+
+  // Form 4 window rolls forward; prune what fell out of it. Filings that
+  // shareholder_votes references are never Form 4s.
+  await pool.query(`delete from filings where cik = $1 and form = '4' and filing_date < $2::date`, [issuer.cik, FORM4_FLOOR]);
 
   // Bulk upsert via UNNEST -- a single round-trip for hundreds of filings,
   // versus a per-row insert that turns each big-cap issuer into a 700-row
