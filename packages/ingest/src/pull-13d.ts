@@ -15,6 +15,7 @@
 //   tsx src/pull-13d.ts ETSY EBAY             # subset by subject ticker
 //   tsx src/pull-13d.ts --since=2025-01-01    # date filter
 //   tsx src/pull-13d.ts --limit=50            # cap (smoke test / cost control)
+//   tsx src/pull-13d.ts --13d-only            # skip passive 13G holders
 
 import { z } from "zod";
 import { pool } from "./db.js";
@@ -180,7 +181,29 @@ async function extractOne(filing: Filing, issuerName: string): Promise<ThirteenD
   return ThirteenDExtraction.parse(json);
 }
 
-async function persist(filing: Filing, extracted: ThirteenDExtraction, raw: unknown): Promise<void> {
+// An issuer's submissions feed lists the 13D/Gs it filed on other companies
+// alongside those filed on it. When the filer is the issuer itself, the
+// filing is about someone else's stock and must not count against it.
+const normName = (s: string) =>
+  s.toLowerCase().replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\b(the|inc|incorporated|corp|corporation|co|company|ltd|limited|plc|llc|lp|l p|n v|s a|sa|nv|ag|se)\b/g, " ")
+    .replace(/\s+/g, " ").trim();
+function isSelfFiled(filer: string, issuer: string): boolean {
+  const a = normName(filer), b = normName(issuer);
+  return a.length > 2 && b.length > 2 && (a === b || a.startsWith(b + " ") || b.startsWith(a + " "));
+}
+
+// The model sometimes returns the CUSIP or a dashed file number as the CIK,
+// and sums group members into stakes over 100%. Keep only values that can
+// be real.
+function cleanCik(v: string | null): string | null {
+  if (!v || !/^[\d-]+$/.test(v)) return null;
+  const digits = v.replace(/-/g, "");
+  return digits.length >= 1 && digits.length <= 10 ? digits.padStart(10, "0") : null;
+}
+const cleanPct = (v: number | null) => (v != null && v >= 0 && v < 100 ? v : null);
+
+async function persist(filing: Filing, extracted: ThirteenDExtraction, raw: unknown, issuerName: string): Promise<void> {
   await pool.query(
     `insert into thirteen_d_filings (
        accession_number, cik, form, filing_date, event_date,
@@ -189,8 +212,8 @@ async function persist(filing: Filing, extracted: ThirteenDExtraction, raw: unkn
        aggregate_shares, aggregate_percent,
        sole_voting_power, shared_voting_power,
        sole_dispositive_power, shared_dispositive_power,
-       group_members, model, raw_json, extracted_at
-     ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20, now())
+       group_members, model, raw_json, is_self_filed, extracted_at
+     ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21, now())
      on conflict (accession_number) do update set
        filer_name = excluded.filer_name,
        filer_cik = excluded.filer_cik,
@@ -208,6 +231,7 @@ async function persist(filing: Filing, extracted: ThirteenDExtraction, raw: unkn
        group_members = excluded.group_members,
        model = excluded.model,
        raw_json = excluded.raw_json,
+       is_self_filed = excluded.is_self_filed,
        extracted_at = now()`,
     [
       filing.accession_number,
@@ -216,13 +240,13 @@ async function persist(filing: Filing, extracted: ThirteenDExtraction, raw: unkn
       filing.filing_date,
       extracted.event_date,
       extracted.filer_name,
-      extracted.filer_cik,
+      cleanCik(extracted.filer_cik),
       extracted.is_active_intent,
       extracted.purpose_summary,
       extracted.cooperation_agreement_present,
       extracted.standstill_present,
       extracted.aggregate_shares,
-      extracted.aggregate_percent,
+      cleanPct(extracted.aggregate_percent),
       extracted.sole_voting_power,
       extracted.shared_voting_power,
       extracted.sole_dispositive_power,
@@ -230,6 +254,7 @@ async function persist(filing: Filing, extracted: ThirteenDExtraction, raw: unkn
       extracted.group_members,
       LLM_MODEL,
       JSON.stringify(raw),
+      isSelfFiled(extracted.filer_name, issuerName),
     ],
   );
 }
@@ -265,7 +290,7 @@ async function pullOne(issuer: IssuerSeed, opts: { since?: string; limit?: numbe
         failures++;
         continue;
       }
-      await persist(filing, extracted, extracted);
+      await persist(filing, extracted, extracted, issuer.name);
       console.log(
         `  ${filing.accession_number} ${filing.form.padEnd(11)} ` +
           `${extracted.filer_name.slice(0, 35).padEnd(35)} ` +
@@ -287,6 +312,7 @@ async function main(): Promise<void> {
   const limit = parseInt(argv.find((a) => a.startsWith("--limit="))?.split("=")[1] ?? "0", 10) || undefined;
   const concurrency = parseInt(argv.find((a) => a.startsWith("--concurrency="))?.split("=")[1] ?? "4", 10);
   const force = argv.includes("--force");
+  const only13d = argv.includes("--13d-only");
   const tickers = argv.filter((a) => !a.startsWith("--"));
   const targets = await resolveTargets(tickers);
 
@@ -299,6 +325,7 @@ async function main(): Promise<void> {
   const tickerByCik = new Map(targets.map((t) => [t.cik, t.ticker]));
   const params: unknown[] = [ciks];
   let where = "f.cik = any($1::text[]) and (f.form like 'SC 13%' or f.form like 'SCHEDULE 13%')";
+  if (only13d) where += " and f.form ilike '%13D%'";
   if (since) {
     params.push(since);
     where += ` and f.filing_date >= $${params.length}::date`;
@@ -346,7 +373,7 @@ async function main(): Promise<void> {
         if (!extracted) {
           failures++;
         } else {
-          await persist(filing, extracted, extracted);
+          await persist(filing, extracted, extracted, issuerName);
           console.log(
             `  [${ticker}] ${filing.accession_number} ${filing.form.padEnd(11)} ` +
               `${extracted.filer_name.slice(0, 35).padEnd(35)} ` +

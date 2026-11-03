@@ -40,12 +40,39 @@ const xmlParser = new XMLParser({
   parseAttributeValue: false,
 });
 
+// SEC answers 429 once we cross ~10 req/s and keeps refusing until traffic
+// drops. A shared cooldown pauses every worker, not just the one that hit it,
+// so the run backs off as a whole instead of hammering through the block.
+// Every request also takes a slot from a global pacer capped at 8 req/s.
+let cooldownUntil = 0;
+let nextSlot = 0;
+const MIN_GAP_MS = 125;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 async function fetchText(url: string): Promise<string> {
-  const res = await fetch(url, {
-    headers: { "User-Agent": EDGAR_USER_AGENT, "Accept-Encoding": "identity" },
-  });
-  if (!res.ok) throw new Error(`${url}: ${res.status}`);
-  return await res.text();
+  for (let attempt = 0; ; attempt++) {
+    const now = Date.now();
+    nextSlot = Math.max(nextSlot + MIN_GAP_MS, now, cooldownUntil);
+    const wait = nextSlot - now;
+    if (wait > 0) await sleep(wait);
+    // A stalled socket would otherwise park a worker forever.
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: { "User-Agent": EDGAR_USER_AGENT, "Accept-Encoding": "identity" },
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch (err) {
+      if (attempt < 4) { await sleep(5_000 * (attempt + 1)); continue; }
+      throw err;
+    }
+    if (res.status === 429 && attempt < 6) {
+      cooldownUntil = Math.max(cooldownUntil, Date.now() + 15_000 * 2 ** attempt);
+      continue;
+    }
+    if (!res.ok) throw new Error(`${url}: ${res.status}`);
+    return await res.text();
+  }
 }
 
 // The accession folder index is HTML; we parse out the first non-XSL .xml

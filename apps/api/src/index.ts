@@ -134,7 +134,7 @@ app.get("/companies/:ticker/13d", async (c) => {
             t.aggregate_percent, t.group_members
      from thirteen_d_filings t
      join companies c on c.cik = t.cik
-     where c.ticker = $1
+     where c.ticker = $1 and not t.is_self_filed
      order by t.filing_date desc`,
     [ticker],
   );
@@ -160,7 +160,7 @@ const ACTIVIST_SIGNAL_EXPR = `
   coalesce(greatest(x.peer_group_tsr_indexed - x.company_tsr_indexed, 0), 0)
   + (case when exists (
       select 1 from thirteen_d_filings tt
-      where tt.cik = c.cik and tt.filing_date >= current_date - interval '180 days'
+      where tt.cik = c.cik and not tt.is_self_filed and tt.filing_date >= current_date - interval '180 days'
     ) then 75 else 0 end)
   + least(coalesce((
       select count(*) from insider_transactions ii
@@ -226,13 +226,13 @@ app.get("/screen", async (c) => {
       ), 0)::float as insider_net_dollars_365d,
       exists (
         select 1 from thirteen_d_filings t
-        where t.cik = c.cik
+        where t.cik = c.cik and not t.is_self_filed
           and t.filing_date >= current_date - interval '180 days'
       ) as has_recent_13d,
       exists (
         select 1 from thirteen_d_filings t
         where t.cik = c.cik
-          and t.is_active_intent = true
+          and t.is_active_intent = true and not t.is_self_filed
           and t.filing_date >= current_date - interval '18 months'
       ) as has_active_13d,
       lr.revenue as latest_revenue,
@@ -357,7 +357,7 @@ app.get("/companies/:ticker/profile", async (c) => {
     pool().query(
       `select accession_number, form, filing_date::text as filing_date, filer_name,
               aggregate_percent, is_active_intent, purpose_summary
-         from thirteen_d_filings where cik = $1 order by filing_date desc limit 10`,
+         from thirteen_d_filings where cik = $1 and not is_self_filed order by filing_date desc limit 10`,
       [cik],
     ),
     pool().query<{ trading_date: string; adj_close: number }>(
@@ -598,7 +598,7 @@ app.get("/feeds/13d-recent", async (c) => {
             c.market_cap_at_universe_pull as market_cap
      from thirteen_d_filings t
      join companies c on c.cik = t.cik
-     where t.filing_date >= current_date - ($2::int || ' days')::interval
+     where not t.is_self_filed and t.filing_date >= current_date - ($2::int || ' days')::interval
        ${activeOnly ? "and t.is_active_intent = true" : ""}
      order by t.filing_date desc
      limit $1`,
@@ -671,7 +671,7 @@ app.get("/feeds/13d-by-filer", async (c) => {
               c.ticker, c.name as company_name
        from thirteen_d_filings t
        join companies c on c.cik = t.cik
-       where t.filer_name is not null
+       where t.filer_name is not null and not t.is_self_filed
        order by t.filing_date desc
      ),
      by_filer as (

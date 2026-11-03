@@ -318,6 +318,8 @@ const statements = [
   `alter table mismanagement_scores add column if not exists signal_ai_quiet boolean not null default false`,
   `alter table mismanagement_scores add column if not exists signal_debt_capacity boolean not null default false`,
   `alter table mismanagement_scores add column if not exists signals_fired int not null default 0`,
+  // 13D/Gs the issuer filed on someone else, listed in its own submissions feed.
+  `alter table thirteen_d_filings add column if not exists is_self_filed boolean not null default false`,
 
   // ---- AI take-private screen ----
   // Numeric SIC from the submissions JSON (sic_description already exists).

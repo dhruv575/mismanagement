@@ -80,6 +80,7 @@ const SQL = `
     select cik, count(*)::int as n
     from thirteen_d_filings
     where is_active_intent = true
+      and not is_self_filed
       and filing_date >= current_date - interval '18 months'
     group by cik
   ),

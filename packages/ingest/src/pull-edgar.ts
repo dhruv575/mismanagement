@@ -401,13 +401,17 @@ async function pullOne(issuer: IssuerSeed, opts: { fullHistory: boolean; eftsBac
         "SC 13D/A",
         "SC 13G",
         "SC 13G/A",
+        "SCHEDULE 13D",
+        "SCHEDULE 13D/A",
+        "SCHEDULE 13G",
+        "SCHEDULE 13G/A",
       ])
     : { accessionNumber: [], filingDate: [], reportDate: [], form: [], primaryDocument: [] };
   let efts_added = 0;
   for (let i = 0; i < subjects.accessionNumber.length; i++) {
     const accn = subjects.accessionNumber[i]!;
     const form = subjects.form[i] ?? "";
-    if (!form.startsWith("SC 13")) continue;
+    if (!form.startsWith("SC 13") && !form.startsWith("SCHEDULE 13")) continue;
     // The accession number's first 10 digits encode the FILER's CIK, which
     // is always the canonical home for the filing folder. The issuer's CIK
     // folder mirrors mirrored filings but not always -- using the filer's
