@@ -22,6 +22,6 @@ export function aiGatewayApiKey(): string {
 }
 export const LLM_MODEL = process.env.LLM_MODEL || "mistral/mistral-nemo";
 export const EDGAR_USER_AGENT =
-  process.env.EDGAR_USER_AGENT || "Mismanagement contact@example.com";
+  process.env.EDGAR_USER_AGENT || "Takeover contact@example.com";
 export const REPO_ROOT = repoRoot;
 export const DATA_DIR = path.join(repoRoot, "data");

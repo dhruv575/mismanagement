@@ -1,14 +1,11 @@
 import { cache } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { app } from "@mismanagement/api";
+import { app } from "@takeover/api";
 import { fmtDate, fmtUsd } from "@/lib/format";
 import { TickerName } from "@/lib/ticker";
 import { SITE_URL } from "@/lib/site";
-import {
-  FLAG_LABELS, FLAG_RULES, SIGNAL_LABELS, SIGNAL_RULES,
-  flagEvidence, flagMeasure, signalEvidence, signalMeasure,
-} from "@/lib/flags";
+import { SIGNAL_LABELS, SIGNAL_RULES, signalEvidence, signalMeasure, type SignalGroup } from "@/lib/signals";
 import { Delta, Meter, Sparkline } from "@/lib/charts";
 
 export const revalidate = 21600;
@@ -21,9 +18,8 @@ export async function generateStaticParams() {
 type Num = number | null;
 interface Profile {
   company: { ticker: string; name: string; sic: string | null; sic_description: string | null; market_cap: Num; is_russell_3000: boolean };
-  flags: string[];
-  signals: string[];
-  scores: (Record<string, unknown> & { flags_fired?: number }) | null;
+  groups: SignalGroup[];
+  scores: (Record<string, unknown> & { takeover_score?: number }) | null;
   financials: { years: number[]; series: Record<string, Record<number, number>>; latest: Record<string, number> };
   derived: { fiscal_year: Num; ebitda: Num; net_debt: Num; net_debt_to_ebitda: Num; revenue_per_employee: Num; ai_mentions_per_10k_words: Num };
   headcount: { fiscal_year: number; employees: number; matched_text: string } | null;
@@ -58,11 +54,12 @@ export async function generateMetadata({ params }: { params: Promise<{ ticker: s
   const p = await getProfile(ticker);
   if (!p) return { title: ticker.toUpperCase(), robots: { index: false } };
   const { company: co } = p;
-  const fired = p.scores ? p.flags.filter((f) => p.scores![`flag_${f}`] === true) : [];
-  const flagText = p.scores
+  const all = p.groups.flatMap((g) => g.signals);
+  const fired = p.scores ? all.filter((k) => p.scores![k] === true) : [];
+  const scoreText = p.scores
     ? fired.length
-      ? `${fired.length} of ${p.flags.length} red flags: ${fired.map((f) => lowerFirst(FLAG_LABELS[f]!)).join(", ")}.`
-      : `None of the ${p.flags.length} red flags fire.`
+      ? `Takeover score ${fired.length} of ${all.length}: ${fired.map((k) => lowerFirst(SIGNAL_LABELS[k]!)).join(", ")}.`
+      : `Takeover score 0 of ${all.length}.`
     : "";
   const fy = p.financials.years.at(-1);
   const rev = fy != null ? p.financials.series.revenue?.[fy] : undefined;
@@ -71,8 +68,8 @@ export async function generateMetadata({ params }: { params: Promise<{ ticker: s
     p.headcount ? `${p.headcount.employees.toLocaleString("en-US")} employees` : null,
     p.deals.some((x) => x.form !== "8-K") ? "deal filings on record" : null,
   ].filter(Boolean).join(", ");
-  const title = `${co.name} (${co.ticker}) red flags`;
-  const description = `${co.name} (${co.ticker}) scorecard from SEC filings. ${flagText}${facts ? ` ${facts[0]!.toUpperCase()}${facts.slice(1)}.` : ""}`;
+  const title = `${co.name} (${co.ticker}) takeover score`;
+  const description = `${co.name} (${co.ticker}) takeover attractiveness from SEC filings. ${scoreText}${facts ? ` ${facts[0]!.toUpperCase()}${facts.slice(1)}.` : ""}`;
   const path = `/company/${co.ticker}`;
   return {
     title,
@@ -110,7 +107,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
         "@context": "https://schema.org",
         "@type": "WebPage",
         url: `${SITE_URL}/company/${co.ticker}`,
-        name: `${co.name} (${co.ticker}) red flags`,
+        name: `${co.name} (${co.ticker}) takeover score`,
         about: {
           "@type": "Corporation",
           name: co.name,
@@ -145,23 +142,22 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
         </dl>
       </header>
 
-      <section aria-labelledby="flags-h">
-        <h2 id="flags-h">
-          Red flags{" "}
-          {p.scores && <span className="muted">{p.flags.filter((f) => p.scores![`flag_${f}`] === true).length} of {p.flags.length}</span>}
+      <section aria-labelledby="score-h" className="score-head">
+        <h2 id="score-h">
+          Takeover score{" "}
+          {p.scores && <span className="score-value">{p.scores.takeover_score ?? 0}<span className="muted"> of {p.groups.reduce((n, g) => n + g.signals.length, 0)}</span></span>}
         </h2>
-        <SignalGrid keys={p.flags} prefix="flag_" scores={p.scores}
-          labels={FLAG_LABELS} rules={FLAG_RULES} measure={flagMeasure} evidence={flagEvidence} />
       </section>
 
-      <section aria-labelledby="signals-h">
-        <h2 id="signals-h">
-          Takeover attractiveness{" "}
-          {p.scores && <span className="muted">{p.signals.filter((f) => p.scores![`signal_${f}`] === true).length} of {p.signals.length}</span>}
-        </h2>
-        <SignalGrid keys={p.signals} prefix="signal_" scores={p.scores} kind="signal"
-          labels={SIGNAL_LABELS} rules={SIGNAL_RULES} measure={signalMeasure} evidence={signalEvidence} />
-      </section>
+      {p.groups.map((g) => (
+        <section key={g.key} aria-labelledby={`${g.key}-h`}>
+          <h3 id={`${g.key}-h`} className="group-h">
+            {g.label}{" "}
+            {p.scores && <span className="muted">{g.signals.filter((k) => p.scores![k] === true).length} of {g.signals.length}</span>}
+          </h3>
+          <SignalGrid keys={g.signals} scores={p.scores} marketCap={co.market_cap} />
+        </section>
+      ))}
 
         <section id="financials">
           <h2>Financials</h2>
@@ -320,35 +316,26 @@ function lowerFirst(s: string): string {
   return /^[A-Z][a-z]/.test(s) ? s[0]!.toLowerCase() + s.slice(1) : s;
 }
 
-type Measure = { value: number; threshold: number; max: number; invert?: boolean } | null;
-
-// One cell per test: state, measured value, meter against the threshold, rule.
-// Red flags and takeover signals share the layout; `kind` sets the color.
-function SignalGrid({ keys, prefix, scores, labels, rules, measure, evidence, kind }: {
-  keys: string[]; prefix: string; scores: Record<string, unknown> | null;
-  labels: Record<string, string>; rules: Record<string, string>;
-  measure: (f: string, s: Record<string, unknown>) => Measure;
-  evidence: (f: string, s: Record<string, unknown>) => string | null;
-  kind?: "signal";
-}) {
+// One cell per check: state, measured value, meter against the threshold, rule.
+function SignalGrid({ keys, scores, marketCap }: { keys: readonly string[]; scores: Record<string, unknown> | null; marketCap: Num }) {
   return (
-    <ul className="flag-grid" data-kind={kind}>
-      {keys.map((f) => {
-        const fired = scores?.[`${prefix}${f}`] === true;
-        const ev = scores ? evidence(f, scores) : null;
-        const m = scores ? measure(f, scores) : null;
+    <ul className="flag-grid">
+      {keys.map((k) => {
+        const fired = scores?.[k] === true;
+        const ev = scores ? signalEvidence(k, scores, marketCap) : null;
+        const m = scores ? signalMeasure(k, scores) : null;
         return (
-          <li key={f} className="flag-cell" data-fired={fired}>
+          <li key={k} className="flag-cell" data-fired={fired}>
             <div className="flag-cell-top">
-              <span>{labels[f]}</span>
-              <span className="flag-state">{!scores ? "Not scored" : fired ? (kind ? "Yes" : "Fired") : (kind ? "No" : "Clear")}</span>
+              <span>{SIGNAL_LABELS[k]}</span>
+              <span className="flag-state">{!scores ? "Not scored" : fired ? "Yes" : "No"}</span>
             </div>
             <div className="flag-value">{ev ?? "—"}</div>
             {m ? (
               <Meter value={m.invert ? m.max - m.value : m.value} threshold={m.invert ? m.max - m.threshold : m.threshold}
-                max={m.max} fired={fired} label={`${labels[f]}: ${ev ?? ""}`} />
+                max={m.max} fired={fired} label={`${SIGNAL_LABELS[k]}: ${ev ?? ""}`} />
             ) : <div className="meter meter-empty" aria-hidden="true" />}
-            <div className="flag-rule muted">{rules[f]}</div>
+            <div className="flag-rule muted">{SIGNAL_RULES[k]}</div>
           </li>
         );
       })}

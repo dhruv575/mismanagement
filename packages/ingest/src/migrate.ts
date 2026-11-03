@@ -3,8 +3,8 @@
 // Source tables hold what the ingest scripts pull, close to verbatim
 // (companies, filings, financial_metrics, price_history, ixbrl_facts,
 // insider_transactions, thirteen_d_filings, shareholder_votes, deal_filings,
-// headcount, filing_text_signals). mismanagement_scores is the one derived
-// table, materialized by refresh-mismanagement.ts so the API never runs the
+// headcount, filing_text_signals). takeover_scores is the one derived
+// table, materialized by refresh-scores.ts so the API never runs the
 // scoring CTEs at request time.
 
 import { pool } from "./db.js";
@@ -239,8 +239,8 @@ const statements = [
   `create index if not exists ixbrl_facts_concept_idx on ixbrl_facts (concept, period_end desc)`,
   `create index if not exists ixbrl_facts_filing_idx on ixbrl_facts (accession_number)`,
 
-  // ── Perf indexes for the /mismanagement CTE pipeline. ────────────────
-  // The leaderboard query (and the /mismanagement/rank lookup the company
+  // ── Perf indexes for the scoring CTE pipeline. ────────────────
+  // The leaderboard query (and the rank lookup the company
   // page uses) does DISTINCT ON (cik, concept) ORDER BY cik, concept,
   // fiscal_year DESC over financial_metrics. The existing PK is
   // (cik, fiscal_year, concept) which doesn't match — Postgres has to
@@ -254,15 +254,21 @@ const statements = [
   `create index if not exists insider_tx_date_idx on insider_transactions (transaction_date desc)`,
   `create index if not exists thirteen_d_date_idx on thirteen_d_filings (filing_date desc) where is_active_intent`,
 
-  // ── Mismanagement scoreboard, materialized. ──────────────────────────
+  // ── Takeover scoreboard, materialized. ──────────────────────────
   // Re-deriving the eight flags (and their evidence values) from raw
   // tables on every request blew past the Vercel Edge timeout — the
   // pipeline scans hundreds of thousands of rows even with the indexes
   // above. This table holds one row per CIK with everything the
-  // /mismanagement endpoints need. The refresh-mismanagement script
+  // leaderboard endpoints need. The refresh-scores script
   // recomputes it (TRUNCATE + INSERT) on demand; the table is otherwise
   // append-only from the API's perspective.
-  `create table if not exists mismanagement_scores (
+  // Renamed from mismanagement_scores when the site became Takeover.
+  `do $$ begin
+     if to_regclass('mismanagement_scores') is not null and to_regclass('takeover_scores') is null then
+       alter table mismanagement_scores rename to takeover_scores;
+     end if;
+   end $$`,
+  `create table if not exists takeover_scores (
     cik text primary key references companies(cik) on delete cascade,
     years_under int,
     years_tracked int,
@@ -299,27 +305,32 @@ const statements = [
   )`,
   // The endpoint ordering is (flags_fired desc, tiebreak desc, ticker asc).
   // Index covers the first two columns; ticker is read from the join.
-  `create index if not exists mismanagement_scores_rank_idx
-     on mismanagement_scores (flags_fired desc, tiebreak desc)`,
-  // Existing deployments need the new columns even if mismanagement_scores
+  `create index if not exists takeover_scores_rank_idx
+     on takeover_scores (flags_fired desc, tiebreak desc)`,
+  // Existing deployments need the new columns even if takeover_scores
   // was created before the 9th flag landed.
-  `alter table mismanagement_scores add column if not exists flag_governance_dissent boolean not null default false`,
-  `alter table mismanagement_scores add column if not exists latest_sop_support_pct double precision`,
-  `alter table mismanagement_scores add column if not exists latest_min_director_support_pct double precision`,
-  `alter table mismanagement_scores add column if not exists latest_vote_meeting_date date`,
-  // Takeover-attractiveness signals: scored separately from the red flags.
-  `alter table mismanagement_scores add column if not exists revenue_per_employee double precision`,
-  `alter table mismanagement_scores add column if not exists rpe_industry_pctile double precision`,
-  `alter table mismanagement_scores add column if not exists ai_mentions_rate double precision`,
-  `alter table mismanagement_scores add column if not exists ai_rate_pctile double precision`,
-  `alter table mismanagement_scores add column if not exists ebitda double precision`,
-  `alter table mismanagement_scores add column if not exists net_debt_to_ebitda double precision`,
-  `alter table mismanagement_scores add column if not exists signal_low_productivity boolean not null default false`,
-  `alter table mismanagement_scores add column if not exists signal_ai_quiet boolean not null default false`,
-  `alter table mismanagement_scores add column if not exists signal_debt_capacity boolean not null default false`,
-  `alter table mismanagement_scores add column if not exists signals_fired int not null default 0`,
+  `alter table takeover_scores add column if not exists flag_governance_dissent boolean not null default false`,
+  `alter table takeover_scores add column if not exists latest_sop_support_pct double precision`,
+  `alter table takeover_scores add column if not exists latest_min_director_support_pct double precision`,
+  `alter table takeover_scores add column if not exists latest_vote_meeting_date date`,
+  // Buyer-economics signals; they count toward takeover_score with the flags.
+  `alter table takeover_scores add column if not exists revenue_per_employee double precision`,
+  `alter table takeover_scores add column if not exists rpe_industry_pctile double precision`,
+  `alter table takeover_scores add column if not exists ai_mentions_rate double precision`,
+  `alter table takeover_scores add column if not exists ai_rate_pctile double precision`,
+  `alter table takeover_scores add column if not exists ebitda double precision`,
+  `alter table takeover_scores add column if not exists net_debt_to_ebitda double precision`,
+  `alter table takeover_scores add column if not exists signal_low_productivity boolean not null default false`,
+  `alter table takeover_scores add column if not exists signal_ai_quiet boolean not null default false`,
+  `alter table takeover_scores add column if not exists signal_debt_capacity boolean not null default false`,
+  `alter table takeover_scores add column if not exists signals_fired int not null default 0`,
+  `alter table takeover_scores add column if not exists signal_size_fit boolean not null default false`,
+  `alter table takeover_scores add column if not exists takeover_score int not null default 0`,
+  `create index if not exists takeover_scores_score_idx on takeover_scores (takeover_score desc, tiebreak desc)`,
   // 13D/Gs the issuer filed on someone else, listed in its own submissions feed.
   `alter table thirteen_d_filings add column if not exists is_self_filed boolean not null default false`,
+  // Tender offers the issuer made for another company, listed in its own feed.
+  `alter table deal_filings add column if not exists is_self_filed boolean not null default false`,
 
   // ---- AI take-private screen ----
   // Numeric SIC from the submissions JSON (sic_description already exists).

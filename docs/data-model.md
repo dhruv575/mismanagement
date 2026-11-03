@@ -4,7 +4,7 @@ How each concept on the site maps to the Postgres tables and columns that hold i
 
 - Schema: [`packages/ingest/src/migrate.ts`](../packages/ingest/src/migrate.ts)
 - Ingest scripts: [`packages/ingest/src/`](../packages/ingest/src/) (`pull-*.ts`)
-- Scoring: [`packages/ingest/src/refresh-mismanagement.ts`](../packages/ingest/src/refresh-mismanagement.ts)
+- Scoring: [`packages/ingest/src/refresh-scores.ts`](../packages/ingest/src/refresh-scores.ts)
 
 Two recurring gotchas to internalize before reading the rest:
 
@@ -258,6 +258,7 @@ select filing_date, filer_name, aggregate_percent,
 from thirteen_d_filings
 where cik = $1
   and is_active_intent = true
+  and not is_self_filed
   and filing_date > current_date - interval '18 months'
 order by filing_date desc;
 ```
@@ -273,6 +274,10 @@ where cik = $1
 ```
 
 - **Notes:** `is_active_intent = true` is the canonical filter for activist 13Ds (vs. passive 13Gs). `aggregate_percent` is the percent of class beneficially owned (Item 5). `group_members` is a text array (Item 2). The `filings` table has the universe; `thirteen_d_filings` has the extracted fields.
+- **Where each field comes from:**
+  - `filer_name`, `filer_cik` and `is_self_filed` come from the EDGAR header (`<accession>-index-headers.html`), not the model. A company's own submissions feed also lists the 13D/Gs it filed on other companies; those rows have `is_self_filed = true` and are excluded from the Active 13D signal and the API. Add `and not is_self_filed` to any query you write against this table.
+  - `is_active_intent` is set by a separate classifier over `purpose_summary` (`pull-13d --classify-intent --all`). Amendments without a purpose statement inherit the intent of the same filer's latest earlier filing on the company; it stays null when there is none.
+  - `aggregate_percent` is null when the model returned 100% or more (usually group members summed together).
 
 ---
 
@@ -301,7 +306,11 @@ order by trading_date;
 
 Merger proxies (`DEFM14A`/`PREM14A`), going-private schedules (`SC 13E3`) and tender offers (`SC TO-T`) on each issuer, plus Item 1.01 8-Ks found by EDGAR full-text search for known AI-rollup buyers.
 
-- **Notes:** `acquirer` is parsed from the proxy's "Parent is an affiliate of …" sentence. `matched_buyer` is the search term that found the filing — a **mention, not attribution** (bankers' comparable-deal tables cite other buyers' deals). Price and premium are parsed from merger proxies only and may be null.
+- **Where `acquirer` comes from** (`pull-deals --enrich`):
+  - Tender offers (`SC TO-T`) and 13E-3s: the EDGAR header's FILED BY block, excluding the issuer itself.
+  - Merger proxies, and 13E-3s whose header lists only the issuer and insiders: the model reads the opening of the document and returns the buyer, its sponsor (preferred when named), the cash price and the premium. It is told to leave the acquirer null when the issuer is not being acquired (reorganizations, spin-offs, deals where the issuer is the buyer).
+- **`is_self_filed`:** an issuer's submissions feed also lists tender offers it made for other companies. When the header's SUBJECT is another company the row is marked and excluded from the API.
+- **`matched_buyer`:** set when a tracked buyer is the acquirer, or when EDGAR full-text search for the buyer's name found the filing. The second case is a **mention, not attribution** (bankers' comparable-deal tables cite other buyers' deals).
 
 ---
 

@@ -1,40 +1,46 @@
-# Mismanagement
+# Takeover
 
-Red flags for every Russell 3000 company, computed from SEC filings.
+Takeover attractiveness for every Russell 3000 company, computed from SEC filings.
 
-**[mismanagement.droov.info](https://mismanagement.droov.info)**
+**[takeover.droov.info](https://takeover.droov.info)**
 
-Mismanagement scores each company on nine yes/no checks that an activist investor might raise in a letter to the board: shareholder returns that trail peers, CEO pay that climbs anyway, payouts the business can't fund, and so on. Every check is a threshold on numbers the company itself reported to the SEC. The site shows the number behind each flag next to the rule it was tested against, and leaves the judgment to the reader.
+Takeover scores each company on thirteen yes/no checks that an activist or a buyer would look at before making an approach: shareholder returns that trail peers, CEO pay that climbs anyway, a lean balance sheet, a size a buyer can afford, an activist already on the register. Every check is a threshold on numbers the company itself reported to the SEC. The takeover score is the count of checks that fire. The site shows the number behind each check next to the rule it was tested against, and leaves the judgment to the reader.
 
-It also tracks a newer kind of buyer. AI holding companies (Long Lake, Thrive Holdings, General Catalyst's roll-ups) have started taking public, labor-heavy services companies private. Deal filings, headcount, revenue per employee, debt capacity and how often a 10-K mentions AI are pulled alongside the flags.
+It also tracks a newer kind of buyer. AI holding companies (Long Lake, Thrive Holdings, General Catalyst's roll-ups) have started taking public, labor-heavy services companies private. Deal filings, headcount, revenue per employee and how often a 10-K mentions AI are pulled alongside the checks.
 
-## The nine flags
+## The thirteen signals
 
-| Flag | Fires when | Source |
+They fall into three groups.
+
+**Fixable underperformance**: problems a new owner could fix.
+
+| Signal | Fires when | Source |
 |---|---|---|
 | TSR below peers | Total shareholder return trails the company's own peer group in 3+ of the last 5 years | Pay-versus-performance table (XBRL) |
-| High CEO pay despite TSR | Median CEO pay ≥ $15M while the TSR flag fires | Pay-versus-performance table (XBRL) |
-| Active 13D | An active-intent Schedule 13D in the last 18 months | Schedule 13D |
-| Net insider selling | Open-market insider sales exceed purchases by more than $10M over 12 months | Form 4 |
+| High CEO pay despite TSR | Median CEO pay ≥ $15M while the TSR signal fires | Pay-versus-performance table (XBRL) |
 | Earnings not backed by cash | Operating cash flow under 80% of positive net income | 10-K (XBRL) |
 | Dilutive SBC | Stock-based compensation over 10% of revenue | 10-K (XBRL) |
 | Payouts exceed cash flow | Buybacks plus dividends exceed operating cash flow | 10-K (XBRL) |
 | Goodwill-heavy | Goodwill over 40% of total assets | 10-K (XBRL) |
 | Shareholder dissent | Say-on-pay or any director under 80% support at the last annual meeting | 8-K Item 5.07 |
 
-Missing inputs never fire a flag. Thresholds are set where a signal is hard to explain away in a single year, not at statistical cutoffs. They live in [`refresh-mismanagement.ts`](packages/ingest/src/refresh-mismanagement.ts).
-
-## Takeover attractiveness
-
-Three more checks ask a different question: not whether a company is badly run, but whether a buyer would want it. They are counted on their own and never added to the red-flag total.
+**Deal economics**: what makes the company cheap or easy to buy.
 
 | Signal | Fires when | Source |
 |---|---|---|
 | Low revenue per employee | Bottom quartile of its 2-digit SIC industry (industries with 8+ scored companies) | Revenue (XBRL) ÷ headcount from the 10-K |
 | Quiet on AI | AI mentions per 10K words of the latest 10-K are in the bottom quartile of the universe | 10-K full text |
-| Room to borrow | EBITDA is positive and net debt is under 1× EBITDA | XBRL income statement and balance sheet |
+| Net cash | EBITDA is positive and the company holds more cash than debt | XBRL income statement and balance sheet |
+| Buyout-sized | Market cap between $500M and $5B | Shares outstanding × price |
 
-The first two are percentiles, so they recalibrate on every refresh instead of relying on a fixed cutoff.
+**Catalysts**: someone is already moving.
+
+| Signal | Fires when | Source |
+|---|---|---|
+| Active 13D | An active-intent Schedule 13D in the last 18 months, excluding filings by the company itself | Schedule 13D |
+| Net insider selling | Open-market insider sales exceed purchases by more than $10M over 12 months | Form 4 |
+
+Missing inputs never fire a signal. The two percentile signals recalibrate on every refresh; the rest are fixed thresholds set where a signal is hard to explain away in a single year. They live in [`refresh-scores.ts`](packages/ingest/src/refresh-scores.ts).
 
 ## How it works
 
@@ -42,7 +48,7 @@ The first two are percentiles, so they recalibrate on every refresh instead of r
 SEC EDGAR ─┐                                         ┌─ apps/site (Next.js)
 Yahoo      ├─> packages/ingest ─> Postgres (Neon) ─> ├─ apps/api  (Hono)
 Finance   ─┘   pull-*.ts             │               │
-                                     └─ refresh-mismanagement.ts
+                                     └─ refresh-scores.ts
                                         (materializes the scores)
 ```
 
@@ -76,7 +82,7 @@ pnpm pull-votes               # annual-meeting vote results (LLM)
 pnpm pull-deals               # merger proxies, headcount, 10-K text signals
 pnpm pull-deals --buyers      # full-text search for AI-rollup buyers
 pnpm fill-market-cap
-pnpm refresh                  # recompute mismanagement_scores
+pnpm refresh                  # recompute takeover_scores
 ```
 
 Any pull takes tickers to limit its run (`pnpm pull-edgar ADT CBZ`). Then start the site:
@@ -90,7 +96,7 @@ A full first pull of the Russell 3000 takes a few hours, mostly to stay within E
 
 ## Caveats
 
-- Filings report what happened, not why. A fired flag is a question to ask, not a conclusion.
+- Filings report what happened, not why. A fired signal is a question to ask, not a conclusion.
 - XBRL tagging varies between filers. A company that tags a concept unusually may show a gap rather than a value.
 - Headcount, deal terms and acquirers are parsed from filing text and can miss unusual phrasing. Each value links back to its source filing.
 - Nothing here is investment advice.

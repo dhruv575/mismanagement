@@ -45,7 +45,7 @@ importers:
 
   apps/site:
     dependencies:
-      '@mismanagement/api':
+      '@takeover/api':
         specifier: workspace:*
         version: link:../api
       hono:

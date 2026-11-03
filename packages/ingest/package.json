@@ -1,5 +1,5 @@
 {
-  "name": "@mismanagement/ingest",
+  "name": "@takeover/ingest",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -15,7 +15,7 @@
     "pull-votes": "tsx src/pull-votes.ts",
     "pull-deals": "tsx src/pull-deals.ts",
     "fill-market-cap": "tsx src/fill-market-cap.ts",
-    "refresh-mismanagement": "tsx src/refresh-mismanagement.ts",
+    "refresh-scores": "tsx src/refresh-scores.ts",
     "screen": "tsx src/screen.ts",
     "typecheck": "tsc --noEmit"
   },

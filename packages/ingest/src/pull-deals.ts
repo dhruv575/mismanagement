@@ -15,10 +15,13 @@
 //   tsx src/pull-deals.ts                 # all R3K issuers
 //   tsx src/pull-deals.ts ADT CBZ         # subset by ticker
 //   tsx src/pull-deals.ts --buyers        # full-text search for buyer names only
+//   tsx src/pull-deals.ts --enrich        # acquirer from EDGAR headers (tender offers, 13E-3) or the LLM (merger proxies)
 //   tsx src/pull-deals.ts --concurrency=4
 
 import { pool } from "./db.js";
+import { z } from "zod";
 import { EDGAR_USER_AGENT } from "./env.js";
+import { callLLM } from "./llm.js";
 import { resolveTargets, type IssuerSeed } from "./issuers.js";
 
 const DEAL_FORMS = new Set(["DEFM14A", "PREM14A", "SC 13E3", "SC 13E3/A", "SC TO-T", "SC TO-T/A"]);
@@ -69,10 +72,14 @@ function htmlToText(html: string): string {
     .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;|&#160;/g, " ")
-    .replace(/&amp;/g, "&")
     .replace(/&#8217;|&rsquo;/g, "'")
     .replace(/&#822[01];|&[lr]dquo;/g, '"')
-    .replace(/&#\d+;/g, " ")
+    // Accented letters in company names (Gesellschaft f&uuml;r ...).
+    .replace(/&([aeiouAEIOU])(uml|acute|grave|circ);/g, (_, ch: string, kind: string) =>
+      ch.normalize("NFD") + ({ uml: "̈", acute: "́", grave: "̀", circ: "̂" } as Record<string, string>)[kind]!)
+    .replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n)))
+    .replace(/&amp;/g, "&")
+    .normalize("NFC")
     .replace(/\s+/g, " ");
 }
 
@@ -189,10 +196,126 @@ async function pullBuyers(): Promise<void> {
   }
 }
 
+// ---- --enrich: fill acquirer (and proxy terms) on stored deal filings ----
+
+// Tender offers and 13E-3s are filed by the bidder, so the EDGAR header's
+// FILED BY block names the acquirer. A 13E-3 also lists the issuer as a
+// filer; skip it. The SUBJECT block says who the target is: an issuer's
+// submissions feed also lists tender offers it made for other companies.
+async function readHeader(row: { cik: string; accession_number: string; document_url: string }): Promise<{ filers: string[]; subjectCik: string | null }> {
+  const accnNoDash = row.accession_number.replace(/-/g, "");
+  const folder = row.document_url.slice(0, row.document_url.indexOf(accnNoDash) + accnNoDash.length);
+  const filers: string[] = [];
+  let text: string;
+  try {
+    text = htmlToText(await secFetch(`${folder}/${row.accession_number}-index-headers.html`));
+  } catch {
+    // Older filings have no header page; the index page tags each company
+    // "(Filed by)" or "(Subject)" followed by its CIK.
+    const html = await secFetch(`${folder}/${row.accession_number}-index.htm`);
+    let subjectCik: string | null = null;
+    for (const m of html.matchAll(/companyName">([^<]+?) \((Filed by|Subject)\)[\s\S]*?(\d{10})/g)) {
+      if (m[2] === "Subject") subjectCik = m[3]!;
+      else if (m[3] !== row.cik) filers.push(m[1]!.replace(/\s+/g, " ").trim());
+    }
+    return { filers, subjectCik };
+  }
+  const subjectCik = text.split("SUBJECT COMPANY:")[1]?.split("FILED BY:")[0]?.split("CENTRAL INDEX KEY:")[1]?.trim().slice(0, 10) ?? null;
+  for (const part of text.split("FILED BY:").slice(1)) {
+    const name = part.split("COMPANY CONFORMED NAME:")[1]?.split("CENTRAL INDEX KEY:")[0]?.trim();
+    const cik = part.split("CENTRAL INDEX KEY:")[1]?.trim().slice(0, 10);
+    if (name && cik && cik !== row.cik) filers.push(name);
+  }
+  return { filers, subjectCik };
+}
+
+const ProxyTerms = z.object({
+  issuer_acquired: z.boolean().nullable().default(null),
+  acquirer: z.string().nullable().default(null),
+  sponsor: z.string().nullable().default(null),
+  price_per_share: z.number().nullable().default(null),
+  premium_pct: z.number().nullable().default(null),
+});
+const PROXY_PROMPT =
+  "You read the opening of a US merger proxy (DEFM14A or PREM14A) or going-private Schedule 13E-3 and extract the deal terms. " +
+  "issuer_acquired: true only if the filing company is being acquired or taken private by another party; false for " +
+  "reorganizations, reincorporations, reverse splits, spin-offs, or deals where the filing company is the buyer. " +
+  "acquirer: the company or fund acquiring the issuer (the 'Parent' or buyer), not the merger subsidiary; null if none. " +
+  "sponsor: the private-equity firm or ultimate owner behind the acquirer if one is named, else null. " +
+  "price_per_share: cash consideration per share in US dollars, null if stock-only or not stated. " +
+  "premium_pct: the stated premium to the unaffected price in percent, null if not stated. " +
+  "Use only facts stated in the text. Return only JSON with these five keys.";
+
+// Small models sometimes answer with the schema's own wording.
+const realName = (s: string | null) =>
+  s && s.length <= 150 && !/\b(else null|if one is named|ultimate owner|the acquirer|not stated)\b|^null$/i.test(s) ? s : null;
+
+async function enrich(concurrency: number): Promise<void> {
+  const rows = (await pool.query<{ cik: string; accession_number: string; form: string; document_url: string; name: string }>(
+    `select d.cik, d.accession_number, d.form, d.document_url, c.name from deal_filings d
+       join companies c using (cik)
+      where d.acquirer is null and not d.is_self_filed and d.form <> '8-K' and d.document_url is not null`,
+  )).rows;
+  // Reorganizations and spin-offs file merger proxies too; there the
+  // "acquirer" is the issuer itself (or a new holding company of it).
+  const core = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).find((w) => w.length > 2 && !["the", "new"].includes(w)) ?? "";
+  const isSelf = (acquirer: string, issuer: string) => core(acquirer) !== "" && core(acquirer) === core(issuer);
+  console.log(`enrich: ${rows.length} deal filings without an acquirer`);
+  let cursor = 0, done = 0, filled = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < rows.length) {
+      const r = rows[cursor++]!;
+      // Read the document with the model: merger proxies always, and 13E-3s
+      // whose header lists only the issuer and its insiders.
+      const fromText = async (): Promise<boolean> => {
+        const text = htmlToText(await secFetch(r.document_url)).slice(0, 40_000);
+        const { json } = await callLLM({ systemPrompt: PROXY_PROMPT, userPrompt: text, maxTokens: 300 });
+        const t = ProxyTerms.parse(json);
+        const named = t.issuer_acquired === false ? null : realName(t.sponsor) ?? realName(t.acquirer);
+        const acquirer = named && !isSelf(named, r.name) ? named : null;
+        const priced = PRICED_FORMS.has(r.form);
+        await pool.query(
+          `update deal_filings set acquirer = $2, price_per_share = coalesce(price_per_share, $3),
+                  premium_pct = coalesce(premium_pct, $4) where accession_number = $1`,
+          [r.accession_number, acquirer, priced ? t.price_per_share : null, priced ? t.premium_pct : null],
+        );
+        return acquirer != null;
+      };
+      try {
+        if (PRICED_FORMS.has(r.form)) {
+          if (await fromText()) filled++;
+        } else {
+          const { filers, subjectCik } = await readHeader(r);
+          const self = subjectCik != null && subjectCik !== r.cik;
+          await pool.query(
+            `update deal_filings set acquirer = $2, is_self_filed = $3 where accession_number = $1`,
+            [r.accession_number, self ? null : filers.join("; ") || null, self],
+          );
+          if (!self && filers.length) filled++;
+          else if (!self && r.form.startsWith("SC 13E3") && (await fromText())) filled++;
+        }
+      } catch (e) {
+        console.error(`  ${r.accession_number} FAILED: ${e instanceof Error ? e.message : e}`);
+      }
+      if (++done % 100 === 0 || done === rows.length) console.log(`  progress: ${done}/${rows.length} (${filled} filled)`);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, rows.length) }, () => worker()));
+  // A buyer counts as matched when it is the acquirer, not just mentioned.
+  for (const buyer of BUYERS) {
+    await pool.query(`update deal_filings set matched_buyer = $1 where matched_buyer is null and acquirer ilike '%' || $1 || '%'`, [buyer]);
+  }
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   if (argv.includes("--buyers")) {
     await pullBuyers();
+    await pool.end();
+    return;
+  }
+  if (argv.includes("--enrich")) {
+    await enrich(parseInt(argv.find((a) => a.startsWith("--concurrency="))?.split("=")[1] ?? "4", 10));
     await pool.end();
     return;
   }

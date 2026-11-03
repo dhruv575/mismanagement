@@ -4,22 +4,24 @@
 export const OG_SIZE = { width: 1200, height: 630 };
 
 export const C = {
-  bg: "#000000",
-  card: "#0f0f10",
-  line: "rgba(255,255,255,0.12)",
-  ink: "#ececf1",
-  dim: "#b4b4c0",
-  mute: "#8e8ea0",
-  accent: "#8fa4ff",
-  neg: "#f87171",
+  bg: "#ffffff",
+  card: "#f7f7f5",
+  line: "rgba(0,0,0,0.1)",
+  ink: "#18181b",
+  dim: "#52525b",
+  mute: "#71717a",
+  accent: "#4f46e5",
+  hit: "#4f46e5",
+  track: "#e8e8e4",
 };
 
+// A target: two rings and a center on an indigo tile.
 export function Mark({ size = 44 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 64 64">
-      <rect width="64" height="64" rx="14" fill={C.card} />
-      <rect x="17" y="12" width="5" height="42" rx="2.5" fill={C.ink} />
-      <path d="M22 14h24l-6 9 6 9H22z" fill={C.neg} />
+      <rect width="64" height="64" rx="14" fill={C.accent} />
+      <circle cx="32" cy="32" r="18" fill="none" stroke="#ffffff" strokeWidth="5" />
+      <circle cx="32" cy="32" r="6.5" fill="#ffffff" />
     </svg>
   );
 }
@@ -32,8 +34,8 @@ export function Frame({ children }: { children: React.ReactNode }) {
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
         <Mark />
-        <div style={{ display: "flex", fontSize: 28, fontWeight: 600 }}>Mismanagement</div>
-        <div style={{ display: "flex", marginLeft: "auto", fontSize: 22, color: C.mute }}>mismanagement.droov.info</div>
+        <div style={{ display: "flex", fontSize: 28, fontWeight: 600 }}>Takeover</div>
+        <div style={{ display: "flex", marginLeft: "auto", fontSize: 22, color: C.mute }}>takeover.droov.info</div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>{children}</div>
     </div>

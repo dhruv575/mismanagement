@@ -14,7 +14,7 @@ app.use("*", cors());
 // is fine. stale-while-revalidate keeps the cache warm without blocking users.
 const STABLE_CACHE = "public, s-maxage=300, stale-while-revalidate=3600";
 
-app.get("/health", (c) => c.json({ ok: true, service: "mismanagement-api" }));
+app.get("/health", (c) => c.json({ ok: true, service: "takeover-api" }));
 
 // ─────────────────────────────────────────────────────────────────────────
 // Companies — list + detail
@@ -44,11 +44,18 @@ app.get("/search", async (c) => {
     name: string;
     sic_description: string | null;
   }>(
+    // Ticker prefix first, then name, then industry; scored companies only.
     `select cik, ticker, name, sic_description
      from companies
-     where ticker ilike $1 || '%' or name ilike '%' || $1 || '%'
-     order by case when ticker ilike $1 || '%' then 0 else 1 end, ticker
-     limit 10`,
+     where is_russell_3000 and ticker is not null
+       and (ticker ilike $1 || '%' or name ilike '%' || $1 || '%' or sic_description ilike '%' || $1 || '%')
+     order by case when upper(ticker) = upper($1) then 0
+                   when ticker ilike $1 || '%' then 1
+                   when name ilike $1 || '%' then 2
+                   when name ilike '%' || $1 || '%' then 3
+                   else 4 end,
+              market_cap_at_universe_pull desc nulls last
+     limit 8`,
     [q],
   );
   return c.json({ rows: r.rows });
@@ -268,18 +275,16 @@ app.get("/screen", async (c) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// /mismanagement — nine deterministic red-flag checks per R3K issuer.
+// Takeover score — thirteen deterministic yes/no checks per R3K issuer.
 // ─────────────────────────────────────────────────────────────────────────
-// Ranking is `# of flags fired`. NULL inputs are treated as "indeterminate"
-// (the flag does NOT fire) so we don't punish issuers for missing data.
-// Each flag has a stable id so the frontend can render a fixed strip in
-// the same order across rows, and each row carries the supporting value
-// inline for reader inspection — no opaque scoring.
+// The score is the count of checks that fire. NULL inputs never fire a
+// check, so missing data doesn't count against an issuer. Each row
+// carries the supporting values so readers can see the number behind
+// every check; there is no opaque weighting.
 //
-// Flag thresholds were chosen to be at the magnitude where the signal is
-// hard to handwave away in a single year (e.g. > $10M net insider selling,
-// not > $1M). They're not statistical limits — they're "this is large
-// enough that a journalist could write it down."
+// Thresholds sit where a signal is hard to explain away in a single year
+// (e.g. > $10M net insider selling, not > $1M). They are not statistical
+// cutoffs.
 
 // /companies/:ticker/profile — everything the company page renders, from
 // deterministic tables only. One round trip
@@ -321,7 +326,7 @@ app.get("/companies/:ticker/profile", async (c) => {
       `select concept, value from financial_metrics where cik = $1 and fiscal_year = -1 and concept = any($2)`,
       [cik, PROFILE_POINT_CONCEPTS],
     ),
-    pool().query(`select * from mismanagement_scores where cik = $1`, [cik]),
+    pool().query(`select * from takeover_scores where cik = $1`, [cik]),
     pool().query<{ fiscal_year: number; employees: number; matched_text: string; accession_number: string }>(
       `select fiscal_year, employees, matched_text, accession_number from headcount
         where cik = $1 order by fiscal_year desc limit 1`,
@@ -335,7 +340,7 @@ app.get("/companies/:ticker/profile", async (c) => {
     pool().query(
       `select accession_number, form, filing_date::text as filing_date, acquirer, matched_buyer,
               price_per_share, premium_pct, document_url
-         from deal_filings where cik = $1 and (form <> '8-K' or matched_buyer is not null)
+         from deal_filings where cik = $1 and not is_self_filed and (form <> '8-K' or matched_buyer is not null)
         order by filing_date desc limit 20`,
       [cik],
     ),
@@ -387,8 +392,7 @@ app.get("/companies/:ticker/profile", async (c) => {
   c.header("Cache-Control", STABLE_CACHE);
   return c.json({
     company: co.rows[0],
-    flags: MISMANAGEMENT_FLAGS,
-    signals: TAKEOVER_SIGNALS,
+    groups: SIGNAL_GROUPS,
     scores: scores.rows[0] ?? null,
     financials: { years, series, latest },
     derived: {
@@ -420,7 +424,7 @@ app.get("/deals", async (c) => {
     `select d.accession_number, c.ticker, c.name, d.form, d.filing_date::text as filing_date,
             d.acquirer, d.matched_buyer, d.price_per_share, d.premium_pct, d.document_url
        from deal_filings d join companies c on c.cik = d.cik
-      where d.form <> '8-K' or d.matched_buyer is not null
+      where not d.is_self_filed and (d.form <> '8-K' or d.matched_buyer is not null)
       order by d.filing_date desc
       limit 500`,
     [],
@@ -429,70 +433,72 @@ app.get("/deals", async (c) => {
   return c.json({ rows: r.rows });
 });
 
-const MISMANAGEMENT_FLAGS = [
-  "tsr_under",        // 1. TSR < peer TSR in 3+ of last 5 PvP years
-  "pay_through_it",   // 2. Median PEO total comp ≥ $15M AND flag 1
-  "active_13d",       // 3. ≥1 active-intent 13D in last 18 months
-  "insider_selling",  // 4. Net P-S insider $ < -$10M over 12mo
-  "earnings_cash",    // 5. OCF / NI < 0.8 in latest FY (NI > 0)
-  "dilutive_sbc",     // 6. SBC > 10% of revenue (latest FY)
-  "returns_over_fcf", // 7. (Buybacks + dividends) > OCF (latest FY)
-  "goodwill_heavy",   // 8. Goodwill > 40% of total assets
-  "governance_dissent", // 9. Latest SoP support <80% OR any director support <80%
+// Every check is a yes/no column on takeover_scores and counts one toward
+// takeover_score. Grouped by why it makes a company a target.
+const SIGNAL_GROUPS = [
+  {
+    key: "underperformance",
+    label: "Fixable underperformance",
+    signals: [
+      "flag_tsr_under",         // TSR < peer TSR in 3+ of last 5 PvP years
+      "flag_pay_through_it",    // Median PEO total comp ≥ $15M while TSR trails
+      "flag_earnings_cash",     // OCF / NI < 0.8 in latest FY (NI > 0)
+      "flag_dilutive_sbc",      // SBC > 10% of revenue (latest FY)
+      "flag_returns_over_fcf",  // Buybacks + dividends > OCF (latest FY)
+      "flag_goodwill_heavy",    // Goodwill > 40% of total assets
+      "flag_governance_dissent", // Latest say-on-pay or any director < 80% support
+    ],
+  },
+  {
+    key: "economics",
+    label: "Buyer economics",
+    signals: [
+      "signal_low_productivity", // Revenue/employee in bottom quartile of 2-digit SIC (8+ peers)
+      "signal_ai_quiet",         // AI mentions per 10K words in bottom quartile
+      "signal_debt_capacity",    // EBITDA > 0 and net cash
+      "signal_size_fit",         // Market cap $500M–$5B
+    ],
+  },
+  {
+    key: "catalysts",
+    label: "Catalysts",
+    signals: [
+      "flag_active_13d",       // Active-intent 13D in last 18 months
+      "flag_insider_selling",  // Net insider sales over $10M in 12 months
+    ],
+  },
 ] as const;
+const SIGNAL_COUNT = SIGNAL_GROUPS.reduce((n, g) => n + g.signals.length, 0);
 
-// Takeover-attractiveness signals, counted separately in signals_fired.
-const TAKEOVER_SIGNALS = [
-  "low_productivity", // Revenue/employee in bottom quartile of 2-digit SIC (8+ peers)
-  "ai_quiet",         // AI mentions per 10K words in bottom quartile of the universe
-  "debt_capacity",    // EBITDA > 0 and net debt < 1x EBITDA
-] as const;
-
-app.get("/mismanagement", async (c) => {
+app.get("/leaderboard", async (c) => {
   const minMcap = Number(c.req.query("min_mcap") ?? 500e6);
   const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 100), 1), 3000);
   const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
 
-  // Reads from the materialized mismanagement_scores table — refreshed
-  // out-of-band by refresh-mismanagement.ts. Single-pass index scan, no
-  // CTE pipeline at request time.
-  //
-  // The select list is deliberately narrow: every column here is shown
-  // somewhere on the leaderboard (table row + evidence chips + sector +
-  // mcap + flag dots). Dropped capex, latest_pvp_year, latest_vote_meeting_date
-  // because the leaderboard doesn't reference them; per-company endpoints
-  // serve those when a reader drills in.
+  // Reads the materialized takeover_scores table (refresh-scores.ts). The
+  // select list is what the leaderboard row shows: identity, size, score
+  // and each signal for the dot strip.
   const sql = `
     select
       c.cik, c.ticker, c.name, c.sic_description,
       c.market_cap_at_universe_pull as market_cap,
-      ms.years_under, ms.years_tracked, ms.peo_median,
-      ms.latest_company_tsr, ms.latest_peer_tsr,
-      ms.revenue, ms.net_income, ms.ocf, ms.sbc,
-      ms.buybacks, ms.dividends_paid,
-      ms.total_assets, ms.goodwill,
-      ms.insider_net_365d, ms.active_13d_count,
-      ms.flag_tsr_under, ms.flag_pay_through_it, ms.flag_active_13d,
-      ms.flag_insider_selling, ms.flag_earnings_cash, ms.flag_dilutive_sbc,
-      ms.flag_returns_over_fcf, ms.flag_goodwill_heavy,
-      ms.flag_governance_dissent,
-      ms.latest_sop_support_pct, ms.latest_min_director_support_pct,
-      ms.signal_low_productivity, ms.signal_ai_quiet, ms.signal_debt_capacity, ms.signals_fired,
+      ts.takeover_score,
+      ${SIGNAL_GROUPS.flatMap((g) => g.signals.map((s) => `ts.${s}`)).join(", ")},
       count(*) over() as total
-    from mismanagement_scores ms
-    join companies c on c.cik = ms.cik
+    from takeover_scores ts
+    join companies c on c.cik = ts.cik
     where c.is_russell_3000
       and (c.market_cap_at_universe_pull is null or c.market_cap_at_universe_pull >= $1::float8)
-    order by ms.flags_fired desc, ms.tiebreak desc, c.ticker asc
+    order by ts.takeover_score desc, ts.tiebreak desc, c.ticker asc
     limit $2 offset $3
   `;
 
   const [r, dist] = await Promise.all([
     pool().query<Record<string, unknown> & { total: string }>(sql, [minMcap, limit, offset]),
-    // Flag-count histogram + freshness for the leaderboard summary.
-    pool().query<{ flags_fired: number; n: string; refreshed_at: string }>(
-      `select ms.flags_fired, count(*)::text as n, max(ms.refreshed_at)::text as refreshed_at
-         from mismanagement_scores ms join companies c on c.cik = ms.cik
+    // Score histogram + freshness for the leaderboard summary.
+    pool().query<{ score: number; n: string; refreshed_at: string }>(
+      `select ts.takeover_score as score, count(*)::text as n, max(ts.refreshed_at)::text as refreshed_at
+         from takeover_scores ts join companies c on c.cik = ts.cik
         where c.is_russell_3000
           and (c.market_cap_at_universe_pull is null or c.market_cap_at_universe_pull >= $1::float8)
         group by 1 order by 1`,
@@ -500,85 +506,31 @@ app.get("/mismanagement", async (c) => {
     ),
   ]);
 
-  // Strip null fields per-row — Postgres returns every column as a key
-  // including the ~40% that are null per typical row, and JSON.stringify
-  // serializes them as ",field:null". On 2.5K rows that's hundreds of KB
-  // of pure overhead before gzip. The client treats missing == null.
+  // Drop null and false fields per row: on 2.5K rows the repeated
+  // ",field:null" is hundreds of KB before gzip. The client treats missing
+  // as null/false.
   const slim: Record<string, unknown>[] = [];
   for (const row of r.rows) {
     const out: Record<string, unknown> = {};
     for (const k in row) {
       if (k === "total") continue;
       const v = row[k];
-      if (v != null && v !== false) out[k] = v; // also drop false flag bools
+      if (v != null && v !== false) out[k] = v;
     }
     slim.push(out);
   }
 
-  // The materialized scoreboard refreshes via daily cron; serve aggressively
-  // and let Vercel Edge keep the JSON warm at the CDN.
-  c.header(
-    "Cache-Control",
-    "public, max-age=300, s-maxage=86400, stale-while-revalidate=604800",
-  );
+  // Refreshed out of band; serve aggressively and let the CDN keep it warm.
+  c.header("Cache-Control", "public, max-age=300, s-maxage=86400, stale-while-revalidate=604800");
   return c.json({
     count: r.rows.length,
     total: r.rows[0] ? Number(r.rows[0].total) : 0,
-    flags: MISMANAGEMENT_FLAGS,
-    signals: TAKEOVER_SIGNALS,
-    distribution: dist.rows.map((d) => ({ flags_fired: Number(d.flags_fired), count: Number(d.n) })),
+    groups: SIGNAL_GROUPS,
+    max_score: SIGNAL_COUNT,
+    distribution: dist.rows.map((d) => ({ score: Number(d.score), count: Number(d.n) })),
     refreshed_at: dist.rows.reduce<string | null>((m, d) => (m && m > d.refreshed_at ? m : d.refreshed_at), null),
     rows: slim,
   });
-});
-
-// Per-company mismanagement scorecard. Single-row read from the
-// materialized mismanagement_scores table.
-app.get("/companies/:ticker/mismanagement", async (c) => {
-  const ticker = c.req.param("ticker").toUpperCase();
-  const out = await pool().query(
-    `select
-       ms.years_under, ms.years_tracked, ms.peo_median,
-       ms.latest_company_tsr, ms.latest_peer_tsr, ms.latest_pvp_year,
-       ms.revenue, ms.net_income, ms.ocf, ms.capex, ms.sbc,
-       ms.buybacks, ms.dividends_paid,
-       ms.total_assets, ms.goodwill,
-       ms.insider_net_365d, ms.active_13d_count,
-       ms.flag_tsr_under, ms.flag_pay_through_it, ms.flag_active_13d,
-       ms.flag_insider_selling, ms.flag_earnings_cash, ms.flag_dilutive_sbc,
-       ms.flag_returns_over_fcf, ms.flag_goodwill_heavy,
-       ms.flag_governance_dissent,
-       ms.latest_sop_support_pct, ms.latest_min_director_support_pct,
-       ms.latest_vote_meeting_date::text as latest_vote_meeting_date
-     from companies c
-     join mismanagement_scores ms on ms.cik = c.cik
-     where c.ticker = $1
-     limit 1`,
-    [ticker],
-  );
-  c.header("Cache-Control", STABLE_CACHE);
-  return c.json({ flags: MISMANAGEMENT_FLAGS, row: out.rows[0] ?? null });
-});
-
-// /mismanagement/rank/:ticker — read from the materialized scoreboard.
-// row_number() over the index-ordered set; one filter to find the ticker.
-app.get("/mismanagement/rank/:ticker", async (c) => {
-  const ticker = c.req.param("ticker").toUpperCase();
-  const sql = `
-    with ranked as (
-      select c.ticker,
-             row_number() over (order by ms.flags_fired desc, ms.tiebreak desc, c.ticker asc) as rank,
-             count(*) over () as total
-      from mismanagement_scores ms
-      join companies c on c.cik = ms.cik
-      where c.is_russell_3000
-    )
-    select rank::int as rank, total::int as total
-    from ranked where ticker = $1
-  `;
-  const out = await pool().query<{ rank: number; total: number }>(sql, [ticker]);
-  c.header("Cache-Control", STABLE_CACHE);
-  return c.json(out.rows[0] ?? { rank: null, total: 0 });
 });
 
 // ─────────────────────────────────────────────────────────────────────────

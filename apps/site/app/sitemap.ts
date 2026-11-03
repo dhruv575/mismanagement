@@ -5,7 +5,7 @@ import { SITE_URL } from "@/lib/site";
 export const revalidate = 21600;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const board = await api<{ refreshed_at: string | null; rows: { ticker: string }[] }>("/mismanagement?limit=3000");
+  const board = await api<{ refreshed_at: string | null; rows: { ticker: string }[] }>("/leaderboard?limit=3000");
   const lastModified = board.refreshed_at ? new Date(board.refreshed_at) : new Date();
   return [
     { url: `${SITE_URL}/`, lastModified, changeFrequency: "daily", priority: 1 },

@@ -1,10 +1,10 @@
-// Recompute the mismanagement_scores table from primary sources. Run this
+// Recompute the takeover_scores table from primary sources. Run this
 // after any ingest that changes the underlying data (pull-ecd, pull-form4,
 // pull-13d, pull-ixbrl, pull-votes) or on a daily cron.
 //
 // The pipeline is the same CTE chain the API used to run on every
-// /mismanagement request — but here we run it once and write the result.
-// The API endpoints then just SELECT … FROM mismanagement_scores, which
+// leaderboard request — but here we run it once and write the result.
+// The API endpoints then just SELECT … FROM takeover_scores, which
 // is sub-100ms even cold.
 //
 // Invocation:
@@ -178,7 +178,9 @@ const SQL = `
       coalesce(rr.pctile < 0.25, false) as signal_low_productivity,
       coalesce(ar.pctile < 0.25, false) as signal_ai_quiet,
       coalesce(eb.ebitda > 0 and dp.debt is not null
-        and (dp.debt - coalesce(dp.cash, 0)) < 1.0 * eb.ebitda, false) as signal_debt_capacity
+        and dp.debt - coalesce(dp.cash, 0) < 0, false) as signal_debt_capacity,
+      -- The range where private-equity and roll-up buyers do most take-privates.
+      coalesce(c.market_cap_at_universe_pull between 500e6 and 5e9, false) as signal_size_fit
     from companies c
     left join pvp_agg pa on pa.cik = c.cik
     left join pvp_latest pl on pl.cik = c.cik
@@ -192,7 +194,7 @@ const SQL = `
     left join ebitda_fy eb on eb.cik = c.cik
     left join debt_pit dp on dp.cik = c.cik
   )
-  insert into mismanagement_scores (
+  insert into takeover_scores (
     cik, years_under, years_tracked, peo_median,
     latest_company_tsr, latest_peer_tsr, latest_pvp_year,
     revenue, net_income, ocf, capex, sbc, buybacks, dividends_paid,
@@ -203,8 +205,8 @@ const SQL = `
     latest_vote_meeting_date,
     revenue_per_employee, rpe_industry_pctile, ai_mentions_rate, ai_rate_pctile,
     ebitda, net_debt_to_ebitda,
-    signal_low_productivity, signal_ai_quiet, signal_debt_capacity,
-    flags_fired, signals_fired, tiebreak, refreshed_at
+    signal_low_productivity, signal_ai_quiet, signal_debt_capacity, signal_size_fit,
+    flags_fired, signals_fired, takeover_score, tiebreak, refreshed_at
   )
   select
     cik, years_under, years_tracked, peo_median,
@@ -217,7 +219,7 @@ const SQL = `
     latest_vote_meeting_date,
     revenue_per_employee, rpe_industry_pctile, ai_mentions_rate, ai_rate_pctile,
     ebitda, net_debt_to_ebitda,
-    signal_low_productivity, signal_ai_quiet, signal_debt_capacity,
+    signal_low_productivity, signal_ai_quiet, signal_debt_capacity, signal_size_fit,
     (case when flag_tsr_under then 1 else 0 end
       + case when flag_pay_through_it then 1 else 0 end
       + case when flag_active_13d then 1 else 0 end
@@ -231,7 +233,23 @@ const SQL = `
     (case when signal_low_productivity then 1 else 0 end
       + case when signal_ai_quiet then 1 else 0 end
       + case when signal_debt_capacity then 1 else 0 end
+      + case when signal_size_fit then 1 else 0 end
     ) as signals_fired,
+    -- Takeover score: every check in every group counts one.
+    (case when flag_tsr_under then 1 else 0 end
+      + case when flag_pay_through_it then 1 else 0 end
+      + case when flag_active_13d then 1 else 0 end
+      + case when flag_insider_selling then 1 else 0 end
+      + case when flag_earnings_cash then 1 else 0 end
+      + case when flag_dilutive_sbc then 1 else 0 end
+      + case when flag_returns_over_fcf then 1 else 0 end
+      + case when flag_goodwill_heavy then 1 else 0 end
+      + case when flag_governance_dissent then 1 else 0 end
+      + case when signal_low_productivity then 1 else 0 end
+      + case when signal_ai_quiet then 1 else 0 end
+      + case when signal_debt_capacity then 1 else 0 end
+      + case when signal_size_fit then 1 else 0 end
+    ) as takeover_score,
     (coalesce(latest_peer_tsr, 0) - coalesce(latest_company_tsr, 0)) * coalesce(peo_median, 0) as tiebreak,
     now() as refreshed_at
   from combined
@@ -243,10 +261,10 @@ async function main() {
   try {
     await client.query("begin");
     // TRUNCATE not DELETE — instant and reclaims space.
-    await client.query("truncate mismanagement_scores");
+    await client.query("truncate takeover_scores");
     const r = await client.query(SQL);
     await client.query("commit");
-    console.log(`refreshed mismanagement_scores: ${r.rowCount} rows in ${((performance.now() - t0) / 1000).toFixed(1)}s`);
+    console.log(`refreshed takeover_scores: ${r.rowCount} rows in ${((performance.now() - t0) / 1000).toFixed(1)}s`);
   } catch (e) {
     await client.query("rollback");
     throw e;

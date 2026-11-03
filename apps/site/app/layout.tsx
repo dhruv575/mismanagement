@@ -9,7 +9,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: `${SITE_NAME}: red flags for every Russell 3000 company`,
+    default: `${SITE_NAME}: takeover attractiveness for every Russell 3000 company`,
     template: `%s · ${SITE_NAME}`,
   },
   description: SITE_DESCRIPTION,
@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     type: "website",
     siteName: SITE_NAME,
     url: "/",
-    title: `${SITE_NAME}: red flags for every Russell 3000 company`,
+    title: `${SITE_NAME}: takeover attractiveness for every Russell 3000 company`,
     description: SITE_DESCRIPTION,
     locale: "en_US",
   },
@@ -29,8 +29,8 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#000000",
-  colorScheme: "dark",
+  themeColor: "#ffffff",
+  colorScheme: "light",
 };
 
 const websiteJsonLd = {
@@ -50,7 +50,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Static chrome: never behind a data or auth boundary. */}
         <header className="header">
           <div className="header-inner">
-            <a href="/" className="brand">Mismanagement</a>
+            <a href="/" className="brand"><svg width="22" height="22" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#4f46e5" /><circle cx="32" cy="32" r="18" fill="none" stroke="#fff" strokeWidth="5" /><circle cx="32" cy="32" r="6.5" fill="#fff" /></svg>Takeover</a>
             <Nav />
           </div>
         </header>

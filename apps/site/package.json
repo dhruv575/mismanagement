@@ -1,5 +1,5 @@
 {
-  "name": "@mismanagement/site",
+  "name": "@takeover/site",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@mismanagement/api": "workspace:*",
+    "@takeover/api": "workspace:*",
     "hono": "^4.6.14",
     "next": "16.4.3",
     "react": "^19.0.0",

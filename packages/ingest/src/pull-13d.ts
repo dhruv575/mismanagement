@@ -16,6 +16,8 @@
 //   tsx src/pull-13d.ts --since=2025-01-01    # date filter
 //   tsx src/pull-13d.ts --limit=50            # cap (smoke test / cost control)
 //   tsx src/pull-13d.ts --13d-only            # skip passive 13G holders
+//   tsx src/pull-13d.ts --headers-only        # fix filer + self-filed from EDGAR headers (no LLM)
+//   tsx src/pull-13d.ts --classify-intent     # decide intent where extraction left it null (--all: every 13D)
 
 import { z } from "zod";
 import { pool } from "./db.js";
@@ -38,7 +40,7 @@ const NullableString = z.string().nullable().default(null);
 const NullableBool = z.boolean().nullable().default(null);
 
 const ThirteenDExtraction = z.object({
-  filer_name: z.string(),
+  filer_name: NullableString,
   filer_cik: NullableString,
   event_date: NullableString,
   aggregate_shares: NullableNumber,
@@ -125,10 +127,18 @@ const SYSTEM_PROMPT =
 // with exponential backoff. At high concurrency a non-trivial fraction of
 // fetches hit 429; without retry they'd permanently fail and waste the
 // LLM tokens we'd already budgeted for that filing.
+// Every request takes a slot from a shared pacer: 8 req/s keeps the run
+// under EDGAR's 10 req/s however many workers are running.
+let nextSlot = 0;
+const MIN_GAP_MS = 125;
+
 async function fetchHtml(url: string): Promise<string> {
   const maxAttempts = 5;
   let delay = 1000;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const now = Date.now();
+    nextSlot = Math.max(nextSlot + MIN_GAP_MS, now);
+    if (nextSlot > now) await new Promise((r) => setTimeout(r, nextSlot - now));
     const res = await fetch(url, {
       headers: { "User-Agent": EDGAR_USER_AGENT, "Accept-Encoding": "identity" },
     });
@@ -144,6 +154,30 @@ async function fetchHtml(url: string): Promise<string> {
     delay = Math.min(delay * 2, 15_000);
   }
   throw new Error(`${url}: unreachable`);
+}
+
+interface FilingHeader { subjectCik: string | null; filerName: string | null; filerCik: string | null }
+
+// The EDGAR header names the subject company and the filer outright, which
+// beats asking the model for either. Lives next to the primary document.
+async function fetchHeader(filing: Filing): Promise<FilingHeader | null> {
+  if (!filing.primary_doc_url) return null;
+  // The accession folder, not the document's own: new-format XML filings keep
+  // the rendered document in an xslSCHEDULE_13D_X0n/ subfolder.
+  const accnNoDash = filing.accession_number.replace(/-/g, "");
+  const folder = filing.primary_doc_url.slice(0, filing.primary_doc_url.indexOf(accnNoDash) + accnNoDash.length) + "/";
+  const text = (await fetchHtml(`${folder}${filing.accession_number}-index-headers.html`))
+    .replace(/<[^>]+>/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  const block = (label: string) => text.split(label)[1]?.split(/\n\s*(?:SUBJECT COMPANY|FILED BY|GROUP MEMBERS):/)[0] ?? "";
+  const field = (b: string, key: string) => b.split(`${key}:`)[1]?.split("\n")[0]?.trim() || null;
+  const subject = block("SUBJECT COMPANY:");
+  const filer = block("FILED BY:");
+  if (!subject && !filer) return null;
+  return {
+    subjectCik: field(subject, "CENTRAL INDEX KEY"),
+    filerName: field(filer, "COMPANY CONFORMED NAME"),
+    filerCik: field(filer, "CENTRAL INDEX KEY"),
+  };
 }
 
 function htmlToText(html: string): string {
@@ -178,7 +212,23 @@ async function extractOne(filing: Filing, issuerName: string): Promise<ThirteenD
     text;
 
   const { json } = await callLLM({ systemPrompt: SYSTEM_PROMPT, userPrompt });
-  return ThirteenDExtraction.parse(json);
+  const extracted = ThirteenDExtraction.parse(json);
+  const header = await fetchHeader(filing).catch(() => null);
+  if (header?.filerName) extracted.filer_name = header.filerName;
+  if (header?.filerCik) extracted.filer_cik = header.filerCik;
+  if (!extracted.filer_name) return null;
+  headers.set(filing.accession_number, header);
+  return extracted;
+}
+
+// Header per accession, read by persist() to decide is_self_filed.
+const headers = new Map<string, FilingHeader | null>();
+
+// Self-filed when the header's subject is another company; fall back to
+// comparing names when the header couldn't be read.
+function selfFiled(filing: Filing, filerName: string, issuerName: string): boolean {
+  const subject = headers.get(filing.accession_number)?.subjectCik;
+  return subject ? subject.padStart(10, "0") !== filing.cik.padStart(10, "0") : isSelfFiled(filerName, issuerName);
 }
 
 // An issuer's submissions feed lists the 13D/Gs it filed on other companies
@@ -254,7 +304,7 @@ async function persist(filing: Filing, extracted: ThirteenDExtraction, raw: unkn
       extracted.group_members,
       LLM_MODEL,
       JSON.stringify(raw),
-      isSelfFiled(extracted.filer_name, issuerName),
+      selfFiled(filing, extracted.filer_name!, issuerName),
     ],
   );
 }
@@ -293,7 +343,7 @@ async function pullOne(issuer: IssuerSeed, opts: { since?: string; limit?: numbe
       await persist(filing, extracted, extracted, issuer.name);
       console.log(
         `  ${filing.accession_number} ${filing.form.padEnd(11)} ` +
-          `${extracted.filer_name.slice(0, 35).padEnd(35)} ` +
+          `${(extracted.filer_name ?? "").slice(0, 35).padEnd(35)} ` +
           `${(extracted.aggregate_percent ?? "?").toString().padStart(5)}%  ` +
           `active=${extracted.is_active_intent}`,
       );
@@ -313,6 +363,8 @@ async function main(): Promise<void> {
   const concurrency = parseInt(argv.find((a) => a.startsWith("--concurrency="))?.split("=")[1] ?? "4", 10);
   const force = argv.includes("--force");
   const only13d = argv.includes("--13d-only");
+  if (argv.includes("--headers-only")) return backfillHeaders(concurrency);
+  if (argv.includes("--classify-intent")) return classifyIntent(concurrency, argv.includes("--all"));
   const tickers = argv.filter((a) => !a.startsWith("--"));
   const targets = await resolveTargets(tickers);
 
@@ -376,7 +428,7 @@ async function main(): Promise<void> {
           await persist(filing, extracted, extracted, issuerName);
           console.log(
             `  [${ticker}] ${filing.accession_number} ${filing.form.padEnd(11)} ` +
-              `${extracted.filer_name.slice(0, 35).padEnd(35)} ` +
+              `${(extracted.filer_name ?? "").slice(0, 35).padEnd(35)} ` +
               `${(extracted.aggregate_percent ?? "?").toString().padStart(5)}%  ` +
               `active=${extracted.is_active_intent}`,
           );
@@ -397,6 +449,90 @@ async function main(): Promise<void> {
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, filings.length) }, () => worker()));
   console.log(`done: ${pulled} extracted, ${failures} failures`);
+  await pool.end();
+}
+
+// Run `fn` over `items` with N workers, logging progress every 200.
+async function pool_(label: string, items: unknown[], concurrency: number, fn: (i: number) => Promise<boolean>): Promise<void> {
+  let cursor = 0, done = 0, ok = 0;
+  const t0 = Date.now();
+  const worker = async (): Promise<void> => {
+    while (cursor < items.length) {
+      const i = cursor++;
+      try { if (await fn(i)) ok++; } catch (e) { console.error(`  ${label} ${i} FAILED: ${e instanceof Error ? e.message : e}`); }
+      if (++done % 200 === 0 || done === items.length) {
+        const rate = done / ((Date.now() - t0) / 1000);
+        console.log(`--- progress: ${done}/${items.length} (${ok} updated) ${rate.toFixed(1)}/s, ETA ${((items.length - done) / Math.max(rate, 0.001) / 60).toFixed(1)} min ---`);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+}
+
+// --headers-only: correct filer and self-filed on existing rows from the
+// EDGAR header. No LLM calls.
+async function backfillHeaders(concurrency: number): Promise<void> {
+  const rows = (await pool.query<Filing>(
+    `select t.accession_number, t.cik, t.form, t.filing_date::text, f.primary_doc_url
+       from thirteen_d_filings t join filings f using (accession_number)
+      where f.primary_doc_url is not null`,
+  )).rows;
+  console.log(`headers-only: ${rows.length} filings`);
+  await pool_("header", rows, concurrency, async (i) => {
+    const f = rows[i]!;
+    const h = await fetchHeader(f);
+    if (!h) return false;
+    const self = h.subjectCik ? h.subjectCik.padStart(10, "0") !== f.cik.padStart(10, "0") : null;
+    await pool.query(
+      `update thirteen_d_filings set
+         filer_name = coalesce($2, filer_name),
+         filer_cik = coalesce($3, filer_cik),
+         is_self_filed = coalesce($4, is_self_filed)
+       where accession_number = $1`,
+      [f.accession_number, h.filerName, h.filerCik ? h.filerCik.padStart(10, "0") : null, self],
+    );
+    return true;
+  });
+  await pool.end();
+}
+
+const IntentAnswer = z.object({ active: z.boolean() });
+const INTENT_PROMPT =
+  "You classify the purpose statement (Item 4) of an SEC Schedule 13D. Answer active=true only when " +
+  "the filer states plans or intent to influence the company: seek board seats or nominate directors, " +
+  "push for a sale, merger, spin-off or strategic review, change management, capital allocation or " +
+  "governance, run a proxy contest, or engage with management or the board to make such changes. " +
+  "Boilerplate reservations of rights ('may in the future...', 'reserve the right to...') alone are " +
+  "not active. Investment-only, financing, estate-planning, forward-sale or insider/officer holdings " +
+  "are not active. Return only JSON: {\"active\": true|false}.";
+
+// --classify-intent: second pass over 13Ds the extraction left undecided,
+// using only the purpose summary it already stored.
+async function classifyIntent(concurrency: number, all: boolean): Promise<void> {
+  const rows = (await pool.query<{ accession_number: string; purpose_summary: string }>(
+    `select accession_number, purpose_summary from thirteen_d_filings
+      where ${all ? "true" : "is_active_intent is null"} and purpose_summary is not null
+        and form ilike '%13D%' and not is_self_filed`,
+  )).rows;
+  console.log(`classify-intent: ${rows.length} filings`);
+  await pool_("intent", rows, concurrency, async (i) => {
+    const r = rows[i]!;
+    const { json } = await callLLM({ systemPrompt: INTENT_PROMPT, userPrompt: r.purpose_summary, maxTokens: 50 });
+    const { active } = IntentAnswer.parse(json);
+    await pool.query(`update thirteen_d_filings set is_active_intent = $2 where accession_number = $1`, [r.accession_number, active]);
+    return true;
+  });
+  // Amendments that leave Item 4 unchanged carry no purpose text; they keep
+  // the intent of the same filer's latest earlier filing on the company.
+  const inherited = await pool.query(
+    `update thirteen_d_filings a set is_active_intent = (
+       select p.is_active_intent from thirteen_d_filings p
+        where p.cik = a.cik and p.filer_cik = a.filer_cik
+          and p.filing_date < a.filing_date and p.is_active_intent is not null
+        order by p.filing_date desc limit 1)
+     where a.is_active_intent is null and a.form ilike '%13D/A' and a.filer_cik is not null`,
+  );
+  console.log(`inherited intent onto ${inherited.rowCount} amendment(s) (null where no earlier filing decided)`);
   await pool.end();
 }
 
