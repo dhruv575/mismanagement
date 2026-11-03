@@ -1,5 +1,7 @@
 // Shared frame for generated Open Graph images (1200×630). ImageResponse
 // supports a flexbox subset of CSS, so every container sets display:flex.
+import { PixelMark } from "./mark";
+
 
 export const OG_SIZE = { width: 1200, height: 630 };
 
@@ -15,15 +17,9 @@ export const C = {
   track: "#e8e8e4",
 };
 
-// A target: two rings and a center on an indigo tile.
-export function Mark({ size = 44 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 64 64">
-      <rect width="64" height="64" rx="14" fill={C.accent} />
-      <circle cx="32" cy="32" r="18" fill="none" stroke="#ffffff" strokeWidth="5" />
-      <circle cx="32" cy="32" r="6.5" fill="#ffffff" />
-    </svg>
-  );
+// The pixel mark, at a multiple of 16px.
+export function Mark({ size = 48 }: { size?: number }) {
+  return <PixelMark size={size} />;
 }
 
 export function Frame({ children }: { children: React.ReactNode }) {

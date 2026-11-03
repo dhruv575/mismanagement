@@ -1,3 +1,4 @@
+import { PixelMark } from "@/lib/mark";
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { Nav } from "./nav";
@@ -50,7 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Static chrome: never behind a data or auth boundary. */}
         <header className="header">
           <div className="header-inner">
-            <a href="/" className="brand"><svg width="22" height="22" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#4f46e5" /><circle cx="32" cy="32" r="18" fill="none" stroke="#fff" strokeWidth="5" /><circle cx="32" cy="32" r="6.5" fill="#fff" /></svg>Takeover</a>
+            <a href="/" className="brand"><PixelMark size={32} />Takeover</a>
             <Nav />
           </div>
         </header>
