@@ -430,7 +430,107 @@ app.get("/deals", async (c) => {
     [],
   );
   c.header("Cache-Control", STABLE_CACHE);
-  return c.json({ rows: r.rows });
+  return c.json({
+    rows: (r.rows as { acquirer: string | null; matched_buyer: string | null }[]).map((d) => {
+      const buyer = d.acquirer ?? d.matched_buyer;
+      return { ...d, acquirer_slug: buyer ? acquirerSlug(buyer) || null : null };
+    }),
+  });
+});
+
+// /acquirers — deal filings grouped by buyer. Names are free text from
+// filing headers and proxies, so "MACKENZIE CAPITAL MANAGEMENT, LP" and
+// "MacKenzie Capital Management LP" group on a slug with legal suffixes
+// stripped. 8-Ks found by full-text search count under matched_buyer.
+const LEGAL_SUFFIX = new Set([
+  "inc", "incorporated", "llc", "lp", "llp", "ltd", "limited", "corp", "corporation", "co", "company",
+  "plc", "sa", "sas", "ag", "nv", "bv", "gmbh", "kg", "the", "si",
+]);
+export function acquirerSlug(name: string): string {
+  const words = name.toLowerCase().replace(/&/g, " and ").replace(/\b(\w)\.(?=\w\.)/g, "$1")
+    .replace(/[^a-z0-9]+/g, " ").trim().split(" ");
+  while (words.length > 1 && LEGAL_SUFFIX.has(words[words.length - 1]!)) words.pop();
+  if (words[0] === "the" && words.length > 1) words.shift();
+  return words.join("-");
+}
+
+interface AcqDeal {
+  accession_number: string; ticker: string; name: string; form: string; filing_date: string;
+  buyer: string; ai_rollup: boolean; mention: boolean; price_per_share: number | null; premium_pct: number | null;
+  document_url: string; takeover_score: number | null;
+}
+
+async function acquirerDeals(): Promise<Map<string, { name: string; deals: AcqDeal[] }>> {
+  const r = await pool().query<AcqDeal>(
+    `select d.accession_number, c.ticker, c.name, d.form, d.filing_date::text as filing_date,
+            coalesce(d.acquirer, d.matched_buyer) as buyer,
+            (d.matched_buyer is not null and (d.acquirer is null or d.acquirer ilike '%' || d.matched_buyer || '%')) as ai_rollup,
+            (d.acquirer is null) as mention,
+            d.price_per_share, d.premium_pct, d.document_url, s.takeover_score
+       from deal_filings d
+       join companies c on c.cik = d.cik
+       left join takeover_scores s on s.cik = d.cik
+      where not d.is_self_filed and coalesce(d.acquirer, d.matched_buyer) is not null
+        and (d.form <> '8-K' or d.matched_buyer is not null)
+      order by d.filing_date desc`,
+  );
+  const groups = new Map<string, { names: Map<string, number>; deals: AcqDeal[] }>();
+  type G = { names: Map<string, number>; deals: AcqDeal[] };
+  for (const d of r.rows) {
+    const slug = acquirerSlug(d.buyer);
+    if (!slug) continue;
+    const g: G = groups.get(slug) ?? { names: new Map(), deals: [] };
+    g.names.set(d.buyer, (g.names.get(d.buyer) ?? 0) + 1);
+    g.deals.push(d);
+    groups.set(slug, g);
+  }
+  // Display the most frequent spelling, preferring mixed case over ALL CAPS.
+  const out = new Map<string, { name: string; deals: AcqDeal[] }>();
+  for (const [slug, g] of groups) {
+    const name = [...g.names].sort((a, b) =>
+      Number(a[0] === a[0].toUpperCase()) - Number(b[0] === b[0].toUpperCase()) || b[1] - a[1])[0]![0];
+    out.set(slug, { name, deals: g.deals });
+  }
+  return out;
+}
+
+app.get("/acquirers", async (c) => {
+  const groups = await acquirerDeals();
+  const rows = [...groups].map(([slug, g]) => {
+    const targets = new Map(g.deals.map((d) => [d.ticker, d.name]));
+    const prem = g.deals.map((d) => d.premium_pct).filter((v): v is number => v != null);
+    return {
+      slug, name: g.name,
+      filings: g.deals.length,
+      targets: [...targets].map(([ticker, name]) => ({ ticker, name })),
+      latest: g.deals[0]!.filing_date,
+      ai_rollup: g.deals.some((d) => d.ai_rollup),
+      median_premium: prem.length ? Math.round(prem.sort((a, b) => a - b)[Math.floor(prem.length / 2)]!) : null,
+    };
+  });
+  rows.sort((a, b) => b.targets.length - a.targets.length || b.latest.localeCompare(a.latest));
+  c.header("Cache-Control", STABLE_CACHE);
+  return c.json({ rows });
+});
+
+app.get("/acquirers/:slug", async (c) => {
+  const slug = c.req.param("slug").toLowerCase();
+  const g = (await acquirerDeals()).get(slug);
+  if (!g) return c.json({ error: "not found" }, 404);
+  const targets = new Map<string, { ticker: string; name: string; takeover_score: number | null; filings: number; first: string; last: string }>();
+  for (const d of g.deals) {
+    const t = targets.get(d.ticker);
+    if (t) { t.filings++; t.first = d.filing_date; }
+    else targets.set(d.ticker, { ticker: d.ticker, name: d.name, takeover_score: d.takeover_score, filings: 1, first: d.filing_date, last: d.filing_date });
+  }
+  c.header("Cache-Control", STABLE_CACHE);
+  return c.json({
+    slug, name: g.name,
+    ai_rollup: g.deals.some((d) => d.ai_rollup),
+    aliases: [...new Set(g.deals.map((d) => d.buyer))],
+    targets: [...targets.values()],
+    deals: g.deals,
+  });
 });
 
 // Every check is a yes/no column on takeover_scores and counts one toward

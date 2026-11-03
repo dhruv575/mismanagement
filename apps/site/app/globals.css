@@ -267,6 +267,26 @@ h2 {
 .page > h1 {
   margin-bottom: 20px;
 }
+.page > h1:has(+ .page-lede) {
+  margin-bottom: 6px;
+}
+.page-lede {
+  margin: 0 0 20px;
+}
+
+/* Small inline label, e.g. "AI rollup" next to an acquirer. */
+.tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  vertical-align: middle;
+  color: var(--hit-strong);
+  background: var(--hit-soft);
+  border: 1px solid var(--hit-line);
+}
 
 /* ---- Data tables ---- */
 
@@ -558,8 +578,12 @@ h1 .tk-name {
 .stat-strip {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
+.stat-strip[data-cols="5"] {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
 @media (max-width: 900px) {
-  .stat-strip {
+  .stat-strip,
+  .stat-strip[data-cols] {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

@@ -1,7 +1,8 @@
+import Link from "next/link";
 import { cache } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { app } from "@takeover/api";
+import { acquirerSlug, app } from "@takeover/api";
 import { fmtDate, fmtUsd } from "@/lib/format";
 import { TickerName } from "@/lib/ticker";
 import { SITE_URL } from "@/lib/site";
@@ -205,7 +206,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
                     <tr key={x.accession_number} data-terms={x.price_per_share != null || x.premium_pct != null}>
                       <td className="date muted" data-slot="date">{fmtDate(x.filing_date)}</td>
                       <td data-slot="form"><a href={x.document_url} rel="noopener">{x.form}</a></td>
-                      <td data-slot="by">{x.acquirer ?? (x.matched_buyer ? <span className="muted">Mentions {x.matched_buyer}</span> : "—")}</td>
+                      <td data-slot="by">{x.acquirer ? <Link href={`/acquirers/${acquirerSlug(x.acquirer)}`}>{x.acquirer}</Link> : (x.matched_buyer ? <span className="muted">Mentions {x.matched_buyer}</span> : "—")}</td>
                       <td className="num" data-slot="price">{x.price_per_share != null ? `$${x.price_per_share.toFixed(2)}` : "—"}</td>
                       <td className="num" data-slot="prem">{x.premium_pct != null ? `${x.premium_pct}%` : "—"}</td>
                     </tr>

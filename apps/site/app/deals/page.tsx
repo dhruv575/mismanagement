@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { api } from "@/lib/api";
 import { TickerName } from "@/lib/ticker";
 import { fmtDate } from "@/lib/format";
+import Link from "next/link";
 
 export const revalidate = 21600;
 
@@ -21,6 +22,7 @@ interface Deal {
   filing_date: string;
   acquirer: string | null;
   matched_buyer: string | null;
+  acquirer_slug: string | null;
   price_per_share: number | null;
   premium_pct: number | null;
   document_url: string;
@@ -56,7 +58,7 @@ export default async function Deals() {
                     <TickerName ticker={d.ticker} name={d.name} />
                   </td>
                   <td data-slot="form"><a href={d.document_url} rel="noopener">{d.form}</a></td>
-                  <td data-slot="by">{d.acquirer ?? <span className="muted">{d.matched_buyer ? `Mentions ${d.matched_buyer}` : "—"}</span>}</td>
+                  <td data-slot="by">{d.acquirer && d.acquirer_slug ? <Link href={`/acquirers/${d.acquirer_slug}`}>{d.acquirer}</Link> : d.acquirer ?? <span className="muted">{d.matched_buyer ? `Mentions ${d.matched_buyer}` : "—"}</span>}</td>
                   <td className="hide-narrow muted">{d.matched_buyer ?? "—"}</td>
                   <td className="num" data-slot="price">{d.price_per_share != null ? `$${d.price_per_share.toFixed(2)}` : "—"}</td>
                   <td className="num" data-slot="prem">{d.premium_pct != null ? `${d.premium_pct}%` : "—"}</td>

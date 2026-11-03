@@ -13,6 +13,7 @@ export function Nav() {
     <nav className="nav" aria-label="Primary">
       <Search />
       <Link href="/deals" aria-current={path === "/deals" ? "page" : undefined}>Deals</Link>
+      <Link href="/acquirers" aria-current={path.startsWith("/acquirers") ? "page" : undefined}>Acquirers</Link>
     </nav>
   );
 }
