@@ -23,6 +23,7 @@ import { z } from "zod";
 import { EDGAR_USER_AGENT } from "./env.js";
 import { callLLM } from "./llm.js";
 import { resolveTargets, type IssuerSeed } from "./issuers.js";
+import { AI_TERMS, HEADCOUNT, htmlToText } from "./text-signals.js";
 
 const DEAL_FORMS = new Set(["DEFM14A", "PREM14A", "SC 13E3", "SC 13E3/A", "SC TO-T", "SC TO-T/A"]);
 
@@ -30,10 +31,6 @@ const DEAL_FORMS = new Set(["DEFM14A", "PREM14A", "SC 13E3", "SC 13E3/A", "SC TO
 // comma-separated forms list silently returned zero hits during testing.
 const BUYERS = ["Long Lake", "Thrive Holdings", "General Catalyst"];
 const BUYER_FORMS = ["DEFM14A", "PREM14A", "SC 13E3", "8-K"];
-
-const AI_TERMS = /\b(artificial intelligence|generative AI|AI|machine learning|large language models?|automation)\b/g;
-const HEADCOUNT =
-  /(?:approximately|about|over|more than|nearly)?\s*([\d,]{3,9})\s+(?:full[- ]time(?:[- ]equivalent)?\s+|global\s+)?(?:employees|team members|associates|colleagues|people)/i;
 
 interface Recent {
   accessionNumber: string[];
@@ -50,37 +47,37 @@ interface Submissions {
   filings: { recent: Recent };
 }
 
+async function readPrefix(res: Response, bytes: number): Promise<string> {
+  const reader = res.body!.getReader();
+  const chunks: Uint8Array[] = [];
+  let n = 0;
+  while (n < bytes) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    n += value.length;
+  }
+  await reader.cancel().catch(() => {});
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
 let lastFetch = 0;
-async function secFetch(url: string): Promise<string> {
+async function secFetch(url: string, range?: number): Promise<string> {
   for (let attempt = 0; ; attempt++) {
     // EDGAR fair-access limit is 10 req/s across the process.
     const wait = 120 - (Date.now() - lastFetch);
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     lastFetch = Date.now();
-    const res = await fetch(url, { headers: { "User-Agent": EDGAR_USER_AGENT } });
-    const text = res.ok ? await res.text() : "";
+    // range: read only the first N bytes (full-submission .txt files run to tens of MB).
+    const res = await fetch(url, { headers: { "User-Agent": EDGAR_USER_AGENT, ...(range ? { Range: `bytes=0-${range}` } : {}) } });
+    // SEC ignores Range on Archives; stop reading the stream once we have enough.
+    const text = !res.ok ? "" : range ? await readPrefix(res, range) : await res.text();
     // efts.sec.gov intermittently returns 200 with an OpenSearch ConnectionError body.
     if (res.ok && !text.includes('"errorType"')) return text;
     if (res.status === 404) throw new Error(`404 ${url}`);
     if (attempt >= 5) throw new Error(`${res.status} ${url}`);
     await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
   }
-}
-
-function htmlToText(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;|&#160;/g, " ")
-    .replace(/&#8217;|&rsquo;/g, "'")
-    .replace(/&#822[01];|&[lr]dquo;/g, '"')
-    // Accented letters in company names (Gesellschaft f&uuml;r ...).
-    .replace(/&([aeiouAEIOU])(uml|acute|grave|circ);/g, (_, ch: string, kind: string) =>
-      ch.normalize("NFD") + ({ uml: "̈", acute: "́", grave: "̀", circ: "̂" } as Record<string, string>)[kind]!)
-    .replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n)))
-    .replace(/&amp;/g, "&")
-    .normalize("NFC")
-    .replace(/\s+/g, " ");
 }
 
 const docUrl = (cik: string, accession: string, doc: string) =>
@@ -254,7 +251,7 @@ async function enrich(concurrency: number): Promise<void> {
   const rows = (await pool.query<{ cik: string; accession_number: string; form: string; document_url: string; name: string }>(
     `select d.cik, d.accession_number, d.form, d.document_url, c.name from deal_filings d
        join companies c using (cik)
-      where d.acquirer is null and not d.is_self_filed and d.form <> '8-K' and d.document_url is not null`,
+      where d.acquirer is null and d.issuer_acquired is null and not d.is_self_filed and d.form <> '8-K' and d.document_url is not null`,
   )).rows;
   // Reorganizations and spin-offs file merger proxies too; there the
   // "acquirer" is the issuer itself (or a new holding company of it).
@@ -268,16 +265,21 @@ async function enrich(concurrency: number): Promise<void> {
       // Read the document with the model: merger proxies always, and 13E-3s
       // whose header lists only the issuer and its insiders.
       const fromText = async (): Promise<boolean> => {
-        const text = htmlToText(await secFetch(r.document_url)).slice(0, 40_000);
+        // Full-submission .txt: skip the SGML header, read the first document.
+        const raw = await secFetch(r.document_url, r.document_url.endsWith(".txt") ? 1_500_000 : undefined);
+        const text = htmlToText(raw.slice(Math.max(0, raw.indexOf("<DOCUMENT>")))).slice(0, 40_000);
         const { json } = await callLLM({ systemPrompt: PROXY_PROMPT, userPrompt: text, maxTokens: 300 });
         const t = ProxyTerms.parse(json);
         const named = t.issuer_acquired === false ? null : realName(t.sponsor) ?? realName(t.acquirer);
         const acquirer = named && !isSelf(named, r.name) ? named : null;
         const priced = PRICED_FORMS.has(r.form);
+        // A proxy where the filer is not being bought (reorganization,
+        // spin-off, buyer-side vote) is not a deal on this issuer.
         await pool.query(
           `update deal_filings set acquirer = $2, price_per_share = coalesce(price_per_share, $3),
-                  premium_pct = coalesce(premium_pct, $4) where accession_number = $1`,
-          [r.accession_number, acquirer, priced ? t.price_per_share : null, priced ? t.premium_pct : null],
+                  premium_pct = coalesce(premium_pct, $4), issuer_acquired = $5,
+                  is_self_filed = is_self_filed or $5 is false where accession_number = $1`,
+          [r.accession_number, acquirer, priced ? t.price_per_share : null, priced ? t.premium_pct : null, t.issuer_acquired],
         );
         return acquirer != null;
       };

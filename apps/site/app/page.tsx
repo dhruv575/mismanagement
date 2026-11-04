@@ -14,6 +14,8 @@ interface Row {
   sic_description?: string;
   market_cap?: number;
   takeover_score?: number;
+  sponsor_prob?: number;
+  sponsor_multiple?: number;
   [signal: string]: unknown;
 }
 interface Board {
@@ -22,6 +24,8 @@ interface Board {
   max_score: number;
   distribution: { score: number; count: number }[];
   refreshed_at: string | null;
+  sponsor_3x: number;
+  sponsor: { base_rate: number } | null;
   rows: Row[];
 }
 interface Deal {
@@ -37,7 +41,6 @@ export default async function Home() {
     api<Board>("/leaderboard?limit=100"),
     api<{ rows: Deal[] }>("/deals"),
   ]);
-  const heavy = data.distribution.filter((d) => d.score >= HEAVY).reduce((a, d) => a + d.count, 0);
   const latestDeals = dedupeByCompany(deals.rows.filter((d) => CONFIRMED.has(d.form))).slice(0, 4);
 
   return (
@@ -52,9 +55,9 @@ export default async function Home() {
           <h1 className="sr-only">Takeover attractiveness for every Russell 3000 company</h1>
           <section className="summary" aria-label="Summary">
             <div className="hero">
-              <div className="hero-value">{heavy.toLocaleString("en-US")}</div>
+              <div className="hero-value">{data.sponsor_3x.toLocaleString("en-US")}</div>
               <div className="hero-label">
-                of {data.total.toLocaleString("en-US")} Russell 3000 companies score {HEAVY} or more of {data.max_score} takeover signals
+                of {data.total.toLocaleString("en-US")} Russell 3000 companies have 3× or more the average odds of an AI-rollup-style buyout: a private-equity firm, holdco or rollup buying a services business
               </div>
               {data.refreshed_at && <div className="muted fresh">Updated {updatedAt(data.refreshed_at)}</div>}
             </div>
@@ -78,7 +81,7 @@ export default async function Home() {
                       <span className="deal-card-name">{d.name}</span>
                       <span className="deal-card-terms">
                         {d.price_per_share != null ? `$${d.price_per_share.toFixed(2)}` : d.form}
-                        {d.premium_pct != null && <span className="deal-premium">{` +${d.premium_pct}%`}</span>}
+                        {d.premium_pct != null && <span className="deal-premium">{` +${Math.round(d.premium_pct)}%`}</span>}
                       </span>
                       <span className="muted deal-card-by">
                         {d.acquirer ?? d.matched_buyer ?? "Acquirer not named"}
@@ -91,7 +94,7 @@ export default async function Home() {
           )}
 
           <section className="home-section" aria-labelledby="board-h">
-            <h2 id="board-h">Most attractive targets</h2>
+            <h2 id="board-h">Most likely AI-rollup targets</h2>
             <div className="table-wrap">
               <table className="data rows-hover">
                 <thead>
@@ -100,7 +103,8 @@ export default async function Home() {
                     <th>Company</th>
                     <th className="hide-narrow">Industry</th>
                     <th className="num hide-narrow">Market cap</th>
-                    <th>Score</th>
+                    <th className="num" title="Probability of an AI-rollup-style buyout in the next 12 months">Odds</th>
+                    <th>Signals</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -114,6 +118,10 @@ export default async function Home() {
                         </td>
                         <td className="hide-narrow muted">{r.sic_description ?? "—"}</td>
                         <td className="num hide-narrow">{fmtUsd(r.market_cap)}</td>
+                        <td className="num odds" data-high={(r.sponsor_multiple ?? 0) >= 3}
+                          title={r.sponsor_multiple != null ? `${r.sponsor_multiple.toFixed(1)}× average` : undefined}>
+                          {r.sponsor_prob != null ? `${(r.sponsor_prob * 100).toFixed(1)}%` : "—"}
+                        </td>
                         <td className="nowrap">
                           <span className="flags hide-narrow" aria-hidden="true">
                             {data.groups.map((g) => (

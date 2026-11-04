@@ -18,7 +18,7 @@ interface Profile {
   name: string;
   ai_rollup: boolean;
   aliases: string[];
-  targets: { ticker: string; name: string; takeover_score: Num; filings: number; first: string; last: string }[];
+  targets: { ticker: string; name: string; takeover_score: Num; pre_score: Num; filings: number; first: string; last: string }[];
   deals: { accession_number: string; ticker: string; name: string; form: string; filing_date: string; mention: boolean; price_per_share: Num; premium_pct: Num; document_url: string }[];
 }
 
@@ -68,13 +68,20 @@ export default async function AcquirerPage({ params }: { params: Promise<{ slug:
         <div className="table-wrap">
           <table className="data">
             <thead>
-              <tr><th>Company</th><th className="num">Takeover score</th><th className="num">Filings</th><th>Latest</th></tr>
+              <tr>
+                <th>Company</th>
+                <th className="num" title="Signals fired as of the April 1 before the first filing, out of the 7 that can be rebuilt historically">Score before deal</th>
+                <th className="num" title="Today's takeover score, out of 15">Score now</th>
+                <th className="num">Filings</th>
+                <th>Latest</th>
+              </tr>
             </thead>
             <tbody>
               {p.targets.map((t) => (
                 <tr key={t.ticker}>
                   <td><TickerName ticker={t.ticker} name={t.name} /></td>
-                  <td className="num">{t.takeover_score ?? "—"}</td>
+                  <td className="num">{t.pre_score != null ? <>{t.pre_score}<span className="muted"> / 7</span></> : <span className="muted">—</span>}</td>
+                  <td className="num">{t.ticker.startsWith("CIK") || t.takeover_score == null ? <span className="muted">—</span> : <>{t.takeover_score}<span className="muted"> / 13</span></>}</td>
                   <td className="num">{t.filings}</td>
                   <td className="date muted">{fmtDate(t.last)}</td>
                 </tr>

@@ -375,6 +375,92 @@ const statements = [
     ai_term_count int not null
   )`,
   `create index if not exists filing_text_signals_cik_idx on filing_text_signals (cik, filing_date desc)`,
+
+  // ---- Point-in-time backtest ----
+  // Whether a merger proxy's filer is the company being bought. False for
+  // reorganizations, spin-offs and proxies filed by the buyer (SPACs).
+  `alter table deal_filings add column if not exists issuer_acquired boolean`,
+
+  // Every original Schedule 13D since mid-2017 from the EDGAR quarterly
+  // form index, one row per party (subject and filer both appear).
+  // subject_cik is resolved from the filing header only when both parties
+  // are public companies; otherwise the party in the universe is the subject.
+  `create table if not exists sc13d_index (
+    accession_number text not null,
+    cik text not null,
+    filing_date date not null,
+    primary key (accession_number, cik)
+  )`,
+  `create index if not exists sc13d_index_cik_idx on sc13d_index (cik, filing_date)`,
+  `create table if not exists sc13d_subject (
+    accession_number text primary key,
+    subject_cik text
+  )`,
+
+  // One row per company per cohort: the signals that can be rebuilt as of
+  // April 1 of cohort_year + 1 from data filed by then (XBRL frames for
+  // calendar year cohort_year, 13Ds from the form index), labeled with
+  // whether a deal filing on the company followed within 12 months. Covers
+  // delisted companies, so targets that have since closed are included.
+  // No FK on cik: most rows are companies outside the current universe.
+  `create table if not exists backtest_panel (
+    cik text not null,
+    cohort_year smallint not null,
+    as_of date not null,
+    name text,
+    public_float double precision,
+    revenue double precision,
+    flag_earnings_cash boolean not null,
+    flag_dilutive_sbc boolean not null,
+    flag_returns_over_fcf boolean not null,
+    flag_goodwill_heavy boolean not null,
+    signal_debt_capacity boolean not null,
+    signal_size_fit boolean not null,
+    flag_active_13d boolean not null,
+    score smallint not null,
+    target boolean not null,
+    event_date date,
+    event_accession text,
+    primary key (cik, cohort_year)
+  )`,
+  `alter table backtest_panel add column if not exists revenue_growth double precision`,
+  `alter table backtest_panel add column if not exists float_change double precision`,
+  `alter table backtest_panel add column if not exists float_to_book double precision`,
+  `alter table backtest_panel add column if not exists operating_margin double precision`,
+  `alter table backtest_panel add column if not exists roa double precision`,
+  `alter table backtest_panel add column if not exists cash_to_assets double precision`,
+  `alter table backtest_panel add column if not exists debt_to_assets double precision`,
+  `alter table backtest_panel add column if not exists sic text`,
+  `create index if not exists backtest_panel_event_idx on backtest_panel (event_accession)`,
+  // The measures behind the flags, for fit-model.ts. Null when an input is missing.
+  `alter table backtest_panel
+     add column if not exists ocf_to_net_income double precision,
+     add column if not exists sbc_to_revenue double precision,
+     add column if not exists payouts_to_ocf double precision,
+     add column if not exists goodwill_to_assets double precision,
+     add column if not exists net_debt_to_ebitda double precision,
+     add column if not exists thirteen_d_count int`,
+
+  // The two text signals for a sample of backtest_panel: every target plus
+  // five random non-targets per target in the same cohort, each read from
+  // the last 10-K filed before the as-of date. weight scales controls back
+  // up to the cohort (non-targets / sampled non-targets) so rates are for
+  // the whole panel, not the sample.
+  `create table if not exists backtest_text (
+    cik text not null,
+    cohort_year smallint not null,
+    target boolean not null,
+    weight double precision not null,
+    accession_number text,
+    filing_date date,
+    sic text,
+    word_count int,
+    ai_term_count int,
+    employees int,
+    signal_ai_quiet boolean,
+    signal_low_productivity boolean,
+    primary key (cik, cohort_year)
+  )`,
 ];
 
 for (const stmt of statements) {

@@ -326,7 +326,12 @@ app.get("/companies/:ticker/profile", async (c) => {
       `select concept, value from financial_metrics where cik = $1 and fiscal_year = -1 and concept = any($2)`,
       [cik, PROFILE_POINT_CONCEPTS],
     ),
-    pool().query(`select * from takeover_scores where cik = $1`, [cik]),
+    pool().query(`select ts.*, ${SCORE_SQL} as takeover_score,
+        coalesce(ss.signal_recurring_revenue, false) as signal_recurring_revenue, coalesce(ss.signal_rollup_shape, false) as signal_rollup_shape,
+        ss.probability as sponsor_prob, ss.multiple as sponsor_multiple, ss.percentile as sponsor_percentile,
+        cb.services_share, cb.labor_intensity, cb.ai_automatable, cb.fragmented_market, cb.recurring_revenue, cb.rollup_fit,
+        cb.summary as business_summary, cb.filing_date::text as business_filing_date, cb.accession_number as business_accession
+      from takeover_scores ts left join sponsor_scores ss using (cik) left join current_business cb using (cik) where ts.cik = $1`, [cik]),
     pool().query<{ fiscal_year: number; employees: number; matched_text: string; accession_number: string }>(
       `select fiscal_year, employees, matched_text, accession_number from headcount
         where cik = $1 order by fiscal_year desc limit 1`,
@@ -420,14 +425,24 @@ app.get("/companies/:ticker/profile", async (c) => {
 // schedules, tender offers) plus Item 1.01 8-Ks matched to an AI-rollup
 // buyer by full-text search. matched_buyer is a mention, not attribution.
 app.get("/deals", async (c) => {
+  // ?year=YYYY narrows to one filing year; the history runs back to 2017.
+  const year = Number(c.req.query("year")) || null;
   const r = await pool().query(
     `select d.accession_number, c.ticker, c.name, d.form, d.filing_date::text as filing_date,
-            d.acquirer, d.matched_buyer, d.price_per_share, d.premium_pct, d.document_url
+            d.acquirer, d.matched_buyer, d.price_per_share, d.premium_pct, d.document_url,
+            pre.pre_score, coalesce(c.is_russell_3000, false) as in_universe,
+            dc.buyer_type, dc.target_business, dc.rollup_fit as deal_rollup_fit
        from deal_filings d join companies c on c.cik = d.cik
+       left join deal_class dc on dc.accession_number = d.accession_number
+       left join lateral (
+         select p.score as pre_score from backtest_panel p
+          where p.cik = d.cik and p.as_of < d.filing_date and p.as_of >= d.filing_date - interval '15 months'
+          order by p.as_of desc limit 1) pre on true
       where not d.is_self_filed and (d.form <> '8-K' or d.matched_buyer is not null)
+        and ($1::int is null or extract(year from d.filing_date) = $1::int)
       order by d.filing_date desc
-      limit 500`,
-    [],
+      limit 2000`,
+    [year],
   );
   c.header("Cache-Control", STABLE_CACHE);
   return c.json({
@@ -457,7 +472,7 @@ export function acquirerSlug(name: string): string {
 interface AcqDeal {
   accession_number: string; ticker: string; name: string; form: string; filing_date: string;
   buyer: string; ai_rollup: boolean; mention: boolean; price_per_share: number | null; premium_pct: number | null;
-  document_url: string; takeover_score: number | null;
+  document_url: string; takeover_score: number | null; pre_score: number | null;
 }
 
 async function acquirerDeals(): Promise<Map<string, { name: string; deals: AcqDeal[] }>> {
@@ -466,10 +481,14 @@ async function acquirerDeals(): Promise<Map<string, { name: string; deals: AcqDe
             coalesce(d.acquirer, d.matched_buyer) as buyer,
             (d.matched_buyer is not null and (d.acquirer is null or d.acquirer ilike '%' || d.matched_buyer || '%')) as ai_rollup,
             (d.acquirer is null) as mention,
-            d.price_per_share, d.premium_pct, d.document_url, s.takeover_score
+            d.price_per_share, d.premium_pct, d.document_url, s.takeover_score, pre.pre_score
        from deal_filings d
        join companies c on c.cik = d.cik
        left join takeover_scores s on s.cik = d.cik
+       left join lateral (
+         select p.score as pre_score from backtest_panel p
+          where p.cik = d.cik and p.as_of < d.filing_date and p.as_of >= d.filing_date - interval '15 months'
+          order by p.as_of desc limit 1) pre on true
       where not d.is_self_filed and coalesce(d.acquirer, d.matched_buyer) is not null
         and (d.form <> '8-K' or d.matched_buyer is not null)
       order by d.filing_date desc`,
@@ -517,11 +536,13 @@ app.get("/acquirers/:slug", async (c) => {
   const slug = c.req.param("slug").toLowerCase();
   const g = (await acquirerDeals()).get(slug);
   if (!g) return c.json({ error: "not found" }, 404);
-  const targets = new Map<string, { ticker: string; name: string; takeover_score: number | null; filings: number; first: string; last: string }>();
+  // Deals are newest first, so the last one seen per target is its first
+  // filing and carries the score from before the deal.
+  const targets = new Map<string, { ticker: string; name: string; takeover_score: number | null; pre_score: number | null; filings: number; first: string; last: string }>();
   for (const d of g.deals) {
     const t = targets.get(d.ticker);
-    if (t) { t.filings++; t.first = d.filing_date; }
-    else targets.set(d.ticker, { ticker: d.ticker, name: d.name, takeover_score: d.takeover_score, filings: 1, first: d.filing_date, last: d.filing_date });
+    if (t) { t.filings++; t.first = d.filing_date; t.pre_score = d.pre_score ?? t.pre_score; }
+    else targets.set(d.ticker, { ticker: d.ticker, name: d.name, takeover_score: d.takeover_score, pre_score: d.pre_score, filings: 1, first: d.filing_date, last: d.filing_date });
   }
   c.header("Cache-Control", STABLE_CACHE);
   return c.json({
@@ -530,6 +551,67 @@ app.get("/acquirers/:slug", async (c) => {
     aliases: [...new Set(g.deals.map((d) => d.buyer))],
     targets: [...targets.values()],
     deals: g.deals,
+  });
+});
+
+// /backtest — how the signals did before past deals, from backtest_panel
+// (build-backtest.ts): each company as of April 1, labeled by whether a
+// deal filing followed within 12 months. Lift = deal rate when the signal
+// fired / deal rate overall.
+const BACKTEST_SIGNALS = [
+  "flag_earnings_cash", "flag_dilutive_sbc", "flag_returns_over_fcf", "flag_goodwill_heavy",
+  "signal_debt_capacity", "signal_size_fit", "flag_active_13d",
+] as const;
+const BACKTEST_UNTESTED = [
+  { key: "flag_tsr_under", why: "Pay-versus-performance tables start with fiscal 2022" },
+  { key: "flag_pay_through_it", why: "Pay-versus-performance tables start with fiscal 2022" },
+  { key: "flag_governance_dissent", why: "Vote results are kept for two years" },
+  { key: "flag_insider_selling", why: "Form 4s are kept for two years" },
+  { key: "signal_low_productivity", why: "Headcount is read from current 10-Ks only" },
+  { key: "signal_ai_quiet", why: "10-K text is read for current companies only" },
+];
+
+app.get("/backtest", async (c) => {
+  const totals = await pool().query<Record<string, number>>(
+    `select count(*)::int n, coalesce(sum(target::int), 0)::int deals,
+            min(cohort_year)::int first_cohort, max(cohort_year)::int last_cohort,
+            ${BACKTEST_SIGNALS.map((s) => `sum(${s}::int)::int ${s}_n, sum((${s} and target)::int)::int ${s}_d`).join(", ")}
+       from backtest_panel`,
+  );
+  const t = totals.rows[0]!;
+  const base = t.n && t.deals ? t.deals / t.n : 0;
+  const signals = BACKTEST_SIGNALS.map((key) => {
+    const fired = t[`${key}_n`] ?? 0, deals = t[`${key}_d`] ?? 0;
+    return { key, fired, deals, deal_rate: fired ? deals / fired : null, lift: fired && base ? deals / fired / base : null };
+  });
+  const buckets = await pool().query(
+    `select score::int, count(*)::int n, sum(target::int)::int deals from backtest_panel group by 1 order by 1`,
+  );
+  const cohorts = await pool().query(
+    `select cohort_year::int, as_of::text, count(*)::int n, sum(target::int)::int deals from backtest_panel group by 1, 2 order by 1`,
+  );
+  // Text signals come from a weighted sample (pull-backtest-text.ts): every
+  // target plus random controls, each control standing for `weight` rows.
+  const text = await pool().query<Record<string, number>>(
+    `select count(*) filter (where word_count > 0)::int read,
+            ${["signal_ai_quiet", "signal_low_productivity"].map((s) =>
+              `sum(weight * ${s}::int)::float ${s}_n, sum((${s} and target)::int)::int ${s}_d, count(*) filter (where ${s})::int ${s}_k`).join(", ")}
+       from backtest_text where word_count > 0`,
+  );
+  const x = text.rows[0];
+  const sampled = x?.read ? (["signal_ai_quiet", "signal_low_productivity"] as const).map((key) => {
+    const fired = x[`${key}_n`] ?? 0, deals = x[`${key}_d`] ?? 0;
+    return { key, fired: Math.round(fired), deals, sampled: true, sample_fired: x[`${key}_k`] ?? 0,
+      deal_rate: fired ? deals / fired : null, lift: fired && base ? deals / fired / base : null };
+  }) : [];
+  c.header("Cache-Control", STABLE_CACHE);
+  return c.json({
+    company_years: t.n, deals: t.deals, base_rate: base, text_sample: x?.read ?? 0,
+    first_cohort: t.first_cohort, last_cohort: t.last_cohort, max_score: BACKTEST_SIGNALS.length,
+    signals: [...signals, ...sampled].sort((a, b) => (b.lift ?? 0) - (a.lift ?? 0)),
+    untested: BACKTEST_UNTESTED.filter((u) => !sampled.some((v) => v.key === u.key)),
+    sponsor: await sponsorMeta(),
+    scores: buckets.rows, cohorts: cohorts.rows,
   });
 });
 
@@ -557,6 +639,8 @@ const SIGNAL_GROUPS = [
       "signal_ai_quiet",         // AI mentions per 10K words in bottom quartile
       "signal_debt_capacity",    // EBITDA > 0 and net cash
       "signal_size_fit",         // Market cap $500M–$5B
+      "signal_recurring_revenue", // 10-K business: recurring revenue scored 7+ of 10 (sponsor_scores)
+      "signal_rollup_shape",      // 10-K business: AI-rollup fit scored 5+ of 10 (sponsor_scores)
     ],
   },
   {
@@ -569,11 +653,24 @@ const SIGNAL_GROUPS = [
   },
 ] as const;
 const SIGNAL_COUNT = SIGNAL_GROUPS.reduce((n, g) => n + g.signals.length, 0);
+// Signals computed by sponsor-model.ts (sponsor_scores) rather than refresh-scores.
+const SPONSOR_SIGNALS = new Set<string>(["signal_recurring_revenue", "signal_rollup_shape"]);
+const signalSql = (s: string) => (SPONSOR_SIGNALS.has(s) ? `coalesce(ss.${s}, false) as ${s}` : `ts.${s}`);
+const SCORE_SQL = `(ts.takeover_score + coalesce(ss.signal_recurring_revenue::int, 0) + coalesce(ss.signal_rollup_shape::int, 0))`;
+
+// The fitted sponsor model's headline numbers, for page copy.
+async function sponsorMeta(): Promise<{ base_rate: number; positives: number; rows: number } | null> {
+  const r = await pool().query<{ metrics: { base_rate: number; positives: number; rows: number } }>(
+    `select metrics from takeover_model where id = 'sponsor'`).catch(() => ({ rows: [] as { metrics: { base_rate: number; positives: number; rows: number } }[] }));
+  return r.rows[0]?.metrics ?? null;
+}
 
 app.get("/leaderboard", async (c) => {
   const minMcap = Number(c.req.query("min_mcap") ?? 500e6);
   const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 100), 1), 3000);
   const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
+  // Default order is the sponsor-buyout model; ?sort=score orders by signal count.
+  const sort = c.req.query("sort") === "score" ? "score" : "sponsor";
 
   // Reads the materialized takeover_scores table (refresh-scores.ts). The
   // select list is what the leaderboard row shows: identity, size, score
@@ -582,23 +679,26 @@ app.get("/leaderboard", async (c) => {
     select
       c.cik, c.ticker, c.name, c.sic_description,
       c.market_cap_at_universe_pull as market_cap,
-      ts.takeover_score,
-      ${SIGNAL_GROUPS.flatMap((g) => g.signals.map((s) => `ts.${s}`)).join(", ")},
+      ${SCORE_SQL} as takeover_score,
+      ss.probability as sponsor_prob, ss.multiple as sponsor_multiple,
+      ${SIGNAL_GROUPS.flatMap((g) => g.signals.map(signalSql)).join(", ")},
       count(*) over() as total
     from takeover_scores ts
     join companies c on c.cik = ts.cik
+    left join sponsor_scores ss on ss.cik = ts.cik
     where c.is_russell_3000
       and (c.market_cap_at_universe_pull is null or c.market_cap_at_universe_pull >= $1::float8)
-    order by ts.takeover_score desc, ts.tiebreak desc, c.ticker asc
+    order by ${sort === "score" ? `${SCORE_SQL} desc, ss.probability desc nulls last` : `ss.probability desc nulls last, ${SCORE_SQL} desc`}, ts.tiebreak desc, c.ticker asc
     limit $2 offset $3
   `;
 
   const [r, dist] = await Promise.all([
     pool().query<Record<string, unknown> & { total: string }>(sql, [minMcap, limit, offset]),
     // Score histogram + freshness for the leaderboard summary.
-    pool().query<{ score: number; n: string; refreshed_at: string }>(
-      `select ts.takeover_score as score, count(*)::text as n, max(ts.refreshed_at)::text as refreshed_at
-         from takeover_scores ts join companies c on c.cik = ts.cik
+    pool().query<{ score: number; n: string; refreshed_at: string; sponsor_3x: string }>(
+      `select ${SCORE_SQL} as score, count(*)::text as n, max(ts.refreshed_at)::text as refreshed_at,
+              count(*) filter (where ss.multiple >= 3)::text as sponsor_3x
+         from takeover_scores ts join companies c on c.cik = ts.cik left join sponsor_scores ss on ss.cik = ts.cik
         where c.is_russell_3000
           and (c.market_cap_at_universe_pull is null or c.market_cap_at_universe_pull >= $1::float8)
         group by 1 order by 1`,
@@ -628,6 +728,8 @@ app.get("/leaderboard", async (c) => {
     groups: SIGNAL_GROUPS,
     max_score: SIGNAL_COUNT,
     distribution: dist.rows.map((d) => ({ score: Number(d.score), count: Number(d.n) })),
+    sponsor_3x: dist.rows.reduce((a, d) => a + Number(d.sponsor_3x), 0),
+    sponsor: await sponsorMeta(),
     refreshed_at: dist.rows.reduce<string | null>((m, d) => (m && m > d.refreshed_at ? m : d.refreshed_at), null),
     rows: slim,
   });

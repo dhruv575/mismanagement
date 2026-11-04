@@ -274,6 +274,97 @@ h2 {
   margin: 0 0 20px;
 }
 
+/* Deals: point-in-time backtest summary above the filings table. */
+.backtest {
+  margin-bottom: 36px;
+}
+.backtest h2 {
+  margin-bottom: 6px;
+}
+.bt-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.lift[data-up="true"] {
+  color: var(--hit-strong);
+  font-weight: 600;
+}
+.lift[data-down="true"] {
+  color: var(--text-muted);
+}
+.bt-scores {
+  margin: 0;
+}
+.bt-bars {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 4px;
+  height: 200px;
+}
+.bt-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  text-align: center;
+  min-height: 0;
+}
+.bt-bar {
+  display: block;
+  background: var(--hit);
+  border-radius: 4px 4px 0 0;
+  min-height: 2px;
+}
+.bt-rate {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 4px;
+}
+.bt-k {
+  font-size: 13px;
+  margin-top: 6px;
+}
+.bt-n {
+  font-size: 11px;
+}
+.bt-scores figcaption {
+  margin-top: 8px;
+  font-size: 13px;
+}
+.bt-untested {
+  margin-top: 12px;
+  font-size: 13px;
+}
+.year-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.year-tabs a {
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.year-tabs a:hover {
+  background: var(--surface-2);
+  text-decoration: none;
+}
+.year-tabs a[aria-current="page"] {
+  background: var(--hit-soft);
+  color: var(--hit-strong);
+  font-weight: 600;
+}
+@media (max-width: 760px) {
+  .bt-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* Small inline label, e.g. "AI rollup" next to an acquirer. */
 .tag {
   display: inline-block;
@@ -964,3 +1055,15 @@ h1 .tk-name {
 .nowrap {
   white-space: nowrap;
 }
+
+/* Sponsor-buyout odds (company page) */
+.sponsor { margin-block: 1.5rem; }
+.sponsor h2 { margin-bottom: .25rem; }
+.business { margin-top: .75rem; }
+.business-scores { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: .5rem 1.5rem; margin: .5rem 0 0; }
+.business-scores > div { display: grid; gap: .2rem; }
+.business-scores dt { font-size: .85rem; color: var(--text-muted); }
+.business-scores dd { margin: 0; display: flex; align-items: center; gap: .5rem; font-variant-numeric: tabular-nums; }
+.business-scores .meter { flex: 1; }
+.odds { font-variant-numeric: tabular-nums; }
+.odds[data-high="true"] { color: var(--hit-strong); font-weight: 600; }

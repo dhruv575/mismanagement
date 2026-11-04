@@ -1,6 +1,6 @@
 import { fmtUsd } from "./format";
 
-// The thirteen yes/no checks behind the takeover score, keyed by their
+// The yes/no checks behind the takeover score, keyed by their
 // column on takeover_scores. The API sends the grouping; this file owns
 // the wording, the threshold text and how to show the number behind each.
 
@@ -16,6 +16,8 @@ export const SIGNAL_LABELS: Record<string, string> = {
   signal_ai_quiet: "Quiet on AI",
   signal_debt_capacity: "Net cash",
   signal_size_fit: "Buyout-sized",
+  signal_recurring_revenue: "Recurring revenue",
+  signal_rollup_shape: "AI-rollup shaped",
   flag_active_13d: "Active 13D",
   flag_insider_selling: "Net insider selling",
 };
@@ -33,6 +35,8 @@ export const SIGNAL_RULES: Record<string, string> = {
   signal_ai_quiet: "Bottom quartile of AI mentions in 10-Ks",
   signal_debt_capacity: "More cash than debt, positive EBITDA",
   signal_size_fit: "Market cap $500M–$5B",
+  signal_recurring_revenue: "10-K business scored 7+ of 10 for recurring revenue",
+  signal_rollup_shape: "10-K business scored 5+ of 10 as an AI-rollup target",
   flag_active_13d: "Active-intent 13D in 18 months",
   flag_insider_selling: "Net sales over $10M in 12 months",
 };
@@ -100,6 +104,14 @@ export function signalMeasure(k: string, s: Scores): Measure {
       const p = n(s, "ai_rate_pctile");
       return p != null ? { value: p, threshold: 0.25, max: 1, invert: true } : null;
     }
+    case "signal_recurring_revenue": {
+      const v = n(s, "recurring_revenue");
+      return v != null ? { value: v, threshold: 7, max: 10 } : null;
+    }
+    case "signal_rollup_shape": {
+      const v = n(s, "rollup_fit");
+      return v != null ? { value: v, threshold: 5, max: 10 } : null;
+    }
     case "signal_debt_capacity": {
       // Net debt / EBITDA shifted so net cash (below 0) sits left of the tick.
       const v = n(s, "net_debt_to_ebitda");
@@ -116,6 +128,10 @@ export function signalEvidence(k: string, s: Scores, marketCap?: number | null):
       const u = n(s, "years_under"), t = n(s, "years_tracked");
       return u != null && t ? `${u} of ${t} years` : null;
     }
+    case "signal_recurring_revenue":
+      return n(s, "recurring_revenue") != null ? `${n(s, "recurring_revenue")} of 10` : null;
+    case "signal_rollup_shape":
+      return n(s, "rollup_fit") != null ? `${n(s, "rollup_fit")} of 10` : null;
     case "flag_pay_through_it":
       return n(s, "peo_median") != null ? `${fmtUsd(n(s, "peo_median"))} median` : null;
     case "flag_active_13d":

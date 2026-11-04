@@ -42,6 +42,20 @@ They fall into three groups.
 
 Missing inputs never fire a signal. The two percentile signals recalibrate on every refresh; the rest are fixed thresholds set where a signal is hard to explain away in a single year. They live in [`refresh-scores.ts`](packages/ingest/src/refresh-scores.ts).
 
+## Does it work?
+
+The Deals page carries a point-in-time backtest. For each April 1 since 2019, every company with at least $500M of public float, including ones since bought and delisted, is scored using only what it had filed by then, and labeled by whether a merger proxy, tender offer or going-private filing followed within 12 months. Seven of the thirteen signals can be rebuilt that way; the other six need history the database doesn't keep. See [docs/data-model.md](docs/data-model.md#point-in-time-backtest).
+
+The site's ranking is a separate model aimed at AI-rollup-style acquisitions: a private-equity firm, sponsor-backed platform, holdco or insider group buying a services business. AI rollups themselves are too recent to backtest, so this is their closest precedent. Claude Haiku 5.5 (via the gateway) classifies each historical deal's buyer from the deal document, and scores each company's business from the Item 1 section of its pre-deal 10-K (recurring revenue, services share, labor intensity, work AI could do, fragmentation, rollup fit). A logistic regression on size, goodwill, 13D activity and those scores, trained on earlier years and tested on each of 2020–2024, puts about 6.7× the average rate of these buyouts in its top tenth (24 test positives, so a rough figure). `experiment.ts` compares labels and feature sets; `sponsor-model.ts` fits and applies the model.
+
+```sh
+pnpm --filter @takeover/ingest pull-panel-10k   # pre-deal 10-K for every backtest company-year
+pnpm --filter @takeover/ingest classify-deals   # buyer type for each backtest deal (LLM)
+pnpm --filter @takeover/ingest score-business   # business-model scores per company (LLM)
+pnpm --filter @takeover/ingest experiment       # compare labels and feature sets
+pnpm --filter @takeover/ingest sponsor-model    # fit, score current 10-Ks, write sponsor_scores
+```
+
 ## How it works
 
 ```
@@ -83,6 +97,9 @@ pnpm pull-deals               # merger proxies, headcount, 10-K text signals
 pnpm pull-deals --buyers      # full-text search for AI-rollup buyers
 pnpm fill-market-cap
 pnpm refresh                  # recompute takeover_scores
+pnpm --filter @takeover/ingest pull-deal-history   # every deal filing and 13D since 2017, delisted issuers included
+pnpm pull-deals --enrich      # acquirer, price, premium, issuer_acquired
+pnpm --filter @takeover/ingest build-backtest      # point-in-time panel: signals as of each April 1, labeled by later deals
 ```
 
 Any pull takes tickers to limit its run (`pnpm pull-edgar ADT CBZ`). Then start the site:

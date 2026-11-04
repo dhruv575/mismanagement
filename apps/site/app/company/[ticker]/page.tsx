@@ -143,6 +143,8 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
         </dl>
       </header>
 
+      {p.scores?.sponsor_prob != null && <SponsorOdds s={p.scores} />}
+
       <section aria-labelledby="score-h" className="score-head">
         <h2 id="score-h">
           Takeover score{" "}
@@ -341,5 +343,51 @@ function SignalGrid({ keys, scores, marketCap }: { keys: readonly string[]; scor
         );
       })}
     </ul>
+  );
+}
+
+const BUSINESS_ROWS: [string, string][] = [
+  ["recurring_revenue", "Recurring revenue"],
+  ["rollup_fit", "AI-rollup fit"],
+  ["services_share", "Services share"],
+  ["labor_intensity", "Labor intensity"],
+  ["ai_automatable", "Work AI could do"],
+  ["fragmented_market", "Fragmented market"],
+];
+
+// The AI-rollup buyout model (sponsor-model.ts): odds of a private-equity,
+// holdco or rollup buyer acquiring the company, as a services business,
+// within 12 months.
+function SponsorOdds({ s }: { s: Record<string, unknown> }) {
+  const prob = Number(s.sponsor_prob), mult = Number(s.sponsor_multiple), pctile = Number(s.sponsor_percentile);
+  return (
+    <section aria-labelledby="sponsor-h" className="sponsor">
+      <h2 id="sponsor-h">
+        AI-rollup buyout odds{" "}
+        <span className="score-value">{(prob * 100).toFixed(1)}%<span className="muted"> next 12 months</span></span>
+      </h2>
+      <p className="muted">
+        {mult.toFixed(1)}× the average company · higher than {Math.min(99, Math.floor(pctile * 100))}% of the universe.
+        A private-equity firm, holdco or AI-rollup buyer acquiring it as a services business, from a model backtested on 2018–2024.
+        <Link href="/deals#model"> How it works</Link>
+      </p>
+      {s.business_summary != null && (
+        <div className="business">
+          <p>
+            <strong>From its 10-K:</strong> {String(s.business_summary)}
+            {s.business_filing_date != null && <span className="muted"> (filed {fmtDate(String(s.business_filing_date))})</span>}
+          </p>
+          <dl className="business-scores">
+            {BUSINESS_ROWS.filter(([k]) => s[k] != null).map(([k, label]) => (
+              <div key={k}>
+                <dt>{label}</dt>
+                <dd><Meter value={Number(s[k])} threshold={k === "recurring_revenue" ? 7 : k === "rollup_fit" ? 5 : 10} max={10}
+                  fired={(k === "recurring_revenue" && Number(s[k]) >= 7) || (k === "rollup_fit" && Number(s[k]) >= 5)} label={`${label}: ${Number(s[k])} of 10`} /> {Number(s[k])}<span className="muted">/10</span></dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
+    </section>
   );
 }

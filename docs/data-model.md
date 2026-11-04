@@ -311,6 +311,25 @@ Merger proxies (`DEFM14A`/`PREM14A`), going-private schedules (`SC 13E3`) and te
   - Merger proxies, and 13E-3s whose header lists only the issuer and insiders: the model reads the opening of the document and returns the buyer, its sponsor (preferred when named), the cash price and the premium. It is told to leave the acquirer null when the issuer is not being acquired (reorganizations, spin-offs, deals where the issuer is the buyer).
 - **`is_self_filed`:** an issuer's submissions feed also lists tender offers it made for other companies. When the header's SUBJECT is another company the row is marked and excluded from the API.
 - **`matched_buyer`:** set when a tracked buyer is the acquirer, or when EDGAR full-text search for the buyer's name found the filing. The second case is a **mention, not attribution** (bankers' comparable-deal tables cite other buyers' deals).
+- **`issuer_acquired`:** the model's answer to whether the filing company is the one being bought. `false` (reorganizations, spin-offs, a buyer's own share-issuance vote) also sets `is_self_filed`, so those rows drop out of Deals and the backtest. `null` means the model hasn't read it (tender offers, 13E-3s, older rows) and counts as a deal.
+- **History:** `pull-deal-history.ts` adds every original `DEFM14A`, `PREM14A`, `SC 13E3` and `SC TO-T` since 2017Q3 from the EDGAR quarterly form index, whether or not the issuer is in today's universe. Issuers that are missing are added to `companies` from their submissions JSON with `is_russell_3000 = false`, and get a `CIK<n>` placeholder ticker when they no longer have one (the site shows those by name, unlinked). Blank-check companies (SIC 6770) are skipped, since their merger proxies are buyer-side.
+
+## Point-in-time backtest
+
+- **Source tables:** `backtest_panel` (filled by `build-backtest.ts`), `sc13d_index` and `sc13d_subject` (filled by `pull-deal-history.ts` and `build-backtest.ts`)
+- **Grain:** one row per company per cohort year Y, scored as of April 1 of Y+1.
+
+The backtest asks: as of a date, using only what had been filed by then, did the signals pick out the companies that got a deal filing in the next 12 months?
+
+- **Universe:** every SEC filer with public float of at least $500M (10-K cover page, `dei:EntityPublicFloat`, mid-year Y) and positive revenue in calendar Y, including companies that have since been delisted. Float stands in for market cap, which needs prices we don't keep for delisted companies.
+- **Financials:** SEC XBRL frames for calendar Y (duration concepts) and Y Q4 (balance-sheet concepts), one value per filer, with the same concept fallbacks as `pull-edgar.ts`. Frames return the latest filed value for a period, so a restatement filed after the as-of date can leak in.
+- **13Ds:** original Schedule 13Ds filed in the 18 months before the as-of date, from the quarterly form index. The index lists both parties to each 13D; the subject is read from the filing header and cached in `sc13d_subject`. No intent classification, unlike `thirteen_d_filings`: a 13D (rather than a 13G) already means the holder may seek to influence the company.
+- **Label:** `target` is true when a deal filing (non-self, `issuer_acquired` not false) on the company followed within 12 months; `event_date` and `event_accession` are its first. Companies with a deal filing in the 12 months before the as-of date are left out of that cohort, because they were already being sold.
+- **Signals rebuilt:** earnings not backed by cash, dilutive SBC, payouts over cash flow, goodwill-heavy, net cash, buyout-sized (float up to $5B), active 13D. `score` counts them.
+- **Not rebuilt:** TSR below peers and high CEO pay (pay-versus-performance tables start with fiscal 2022), shareholder dissent and insider selling (two-year windows), revenue per employee and quiet on AI (headcount and 10-K text are read for current companies only).
+- **Cohorts:** a cohort is built once its 12-month label window has closed.
+
+The API joins each deal filing to the company's latest panel row from the 15 months before it (`pre_score`), shown as "Score before" on Deals and acquirer pages.
 
 ---
 
