@@ -732,7 +732,7 @@ h1 .tk-name {
 
 .summary {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 32px;
   align-items: end;
   padding-bottom: 32px;
@@ -1071,3 +1071,15 @@ h1 .tk-name {
 /* Rollups page */
 .buyer-note { margin: .75rem 0 1rem; color: var(--text-secondary); }
 .buyer-note .tag { margin-inline: .25rem; }
+
+/* Collapsed detail sections */
+.backtest-details > summary { cursor: pointer; list-style: none; }
+.backtest-details > summary::-webkit-details-marker { display: none; }
+.backtest-details > summary h2 { display: inline; }
+.backtest-details > summary::after { content: " +"; color: var(--text-muted); font-size: 1.25rem; }
+.backtest-details[open] > summary::after { content: " −"; }
+.other-signals { margin-top: 1rem; }
+.other-signals > summary { cursor: pointer; color: var(--text-secondary); margin-bottom: .75rem; }
+.business-line { white-space: normal; }
+.sponsor-h[data-high="true"] { color: var(--hit-strong); }
+.summary .hero-label { max-width: 46ch; }

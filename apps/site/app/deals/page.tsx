@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { api } from "@/lib/api";
 import { TickerName } from "@/lib/ticker";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, fmtMultiple } from "@/lib/format";
 import { SIGNAL_LABELS } from "@/lib/signals";
 import Link from "next/link";
 
@@ -84,21 +84,12 @@ export default async function Deals({ searchParams }: { searchParams: Promise<{ 
 
       {bt.sponsor && (
         <section className="backtest" id="model" aria-labelledby="model-h">
-          <h2 id="model-h">The AI-rollup buyout model</h2>
+          <h2 id="model-h">How the AI-rollup model works</h2>
           <p className="muted page-lede">
-            AI rollups (holdcos and private-equity-style buyers that acquire services businesses and automate the work) are too
-            new to backtest directly, so the model learns from their closest precedent: private-equity firms, sponsor-backed platforms,
-            holdcos and insider groups buying services businesses (consultancies, staffing, outsourcing, brokerages, clinics, engineering
-            and government services). A language model read each deal document to tell those apart from strategic acquisitions and product
-            companies, and read every company&rsquo;s 10-K from before the deal to score its business: recurring revenue, services share, labor intensity,
-            how much of the work AI could do, market fragmentation and overall fit for an AI rollup.
-          </p>
-          <p className="muted page-lede">
-            {bt.sponsor.positives} of {bt.sponsor.rows.toLocaleString("en-US")} company-years ({pct(bt.sponsor.base_rate)}) were followed by
-            a buyout like that within 12 months. Trained only on earlier years and tested on each of 2020&ndash;2024, the model put about 6.7×
-            the average rate in its top tenth, against about 2× for predicting any deal; with only 24 such buyouts in the test years, treat
-            that as a rough figure. Being a services business, smaller size, AI-rollup fit and goodwill from past acquisitions carry most of
-            the weight.
+            AI rollups are too new to learn from directly, so the model learns from their closest precedent: private-equity firms,
+            holdcos and insider groups buying services businesses. It reads each company&rsquo;s 10-K for recurring revenue, services
+            share, labor intensity and fit for an AI rollup, and weighs that with size and goodwill from past acquisitions. In
+            backtests on 2020&ndash;2024, companies it ranked in the top tenth were about 6.7× as likely as average to be bought this way.
           </p>
         </section>
       )}
@@ -112,31 +103,19 @@ export default async function Deals({ searchParams }: { searchParams: Promise<{ 
             {liveRollup.length > 0 && <> {top10(liveRollup)} of {liveRollup.length} AI-rollup-style buyouts were in the model&rsquo;s top tenth.</>}
             {" "}{top10(live)} of {live.length} deals of any kind were.
           </p>
-          <div className="table-wrap">
-            <table className="data rows-hover">
-              <thead>
-                <tr><th>Announced</th><th>Company</th><th>Buyer</th><th className="hide-narrow">Type</th><th className="num">Model rank</th><th className="num hide-narrow">Odds vs. average</th></tr>
-              </thead>
-              <tbody>
-                {live.map((r) => (
-                  <tr key={r.ticker}>
-                    <td className="date muted">{fmtDate(r.announced)}</td>
-                    <td><TickerName ticker={r.ticker} name={r.name} /></td>
-                    <td>{r.rollup_buyer ?? r.buyer ?? "—"}{r.rollup_buyer && <> <span className="tag">AI rollup</span></>}</td>
-                    <td className="hide-narrow muted">{r.buyer_type && BUYER_TYPE[r.buyer_type] ? BUYER_TYPE[r.buyer_type] : "—"}{r.services_business ? " · services" : ""}</td>
-                    <td className="num" data-high={r.percentile >= 0.9}>Top {Math.max(1, Math.ceil((1 - r.percentile) * 100))}%</td>
-                    <td className="num hide-narrow">{r.multiple.toFixed(1)}×</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ScoreTable rows={liveRollup} />
+          {live.length > liveRollup.length && (
+            <details className="other-signals">
+              <summary>All {live.length} deals, including strategic acquisitions</summary>
+              <ScoreTable rows={live} />
+            </details>
+          )}
         </section>
       )}
 
       {bt.company_years > 0 && (
-        <section className="backtest" aria-labelledby="bt-h">
-          <h2 id="bt-h">Which signals showed up before a deal</h2>
+        <details className="backtest backtest-details">
+          <summary><h2 id="bt-h">Which signals showed up before a deal</h2></summary>
           <p className="muted page-lede">
             Every company with at least $500M of public float, as of April 1 each year from {bt.first_cohort! + 1} to {bt.last_cohort! + 1},
             scored only on what it had filed by then, including companies since bought and delisted.{" "}
@@ -191,7 +170,7 @@ export default async function Deals({ searchParams }: { searchParams: Promise<{ 
               <span key={u.key}>{i > 0 && "; "}{SIGNAL_LABELS[u.key]} ({u.why.charAt(0).toLowerCase() + u.why.slice(1)})</span>
             ))}.
           </p>}
-        </section>
+        </details>
       )}
 
       <nav className="year-tabs" aria-label="Filing year">
@@ -239,5 +218,29 @@ export default async function Deals({ searchParams }: { searchParams: Promise<{ 
         )}
       </div>
     </main>
+  );
+}
+
+function ScoreTable({ rows }: { rows: ScoreRow[] }) {
+  return (
+          <div className="table-wrap">
+            <table className="data rows-hover">
+              <thead>
+                <tr><th>Announced</th><th>Company</th><th>Buyer</th><th className="hide-narrow">Type</th><th className="num hide-narrow">Model rank</th><th className="num" title="How much more likely than average the model rated it">Likelihood</th></tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.ticker}>
+                    <td className="date muted">{fmtDate(r.announced)}</td>
+                    <td><TickerName ticker={r.ticker} name={r.name} /></td>
+                    <td>{r.rollup_buyer ?? r.buyer ?? "—"}{r.rollup_buyer && <> <span className="tag">AI rollup</span></>}</td>
+                    <td className="hide-narrow muted">{r.buyer_type && BUYER_TYPE[r.buyer_type] ? BUYER_TYPE[r.buyer_type] : "—"}{r.services_business ? " · services" : ""}</td>
+                    <td className="num hide-narrow muted">Top {Math.max(1, Math.ceil((1 - r.percentile) * 100))}%</td>
+                    <td className="num odds" data-high={r.multiple >= 3}>{fmtMultiple(r.multiple)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
   );
 }

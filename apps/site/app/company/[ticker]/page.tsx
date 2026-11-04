@@ -3,7 +3,7 @@ import { cache } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { acquirerSlug, app } from "@takeover/api";
-import { fmtDate, fmtUsd } from "@/lib/format";
+import { fmtDate, fmtUsd, likelihoodPhrase } from "@/lib/format";
 import { TickerName } from "@/lib/ticker";
 import { SITE_URL } from "@/lib/site";
 import { SIGNAL_LABELS, SIGNAL_RULES, signalEvidence, signalMeasure, type SignalGroup } from "@/lib/signals";
@@ -147,20 +147,26 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
 
       <section aria-labelledby="score-h" className="score-head">
         <h2 id="score-h">
-          Takeover score{" "}
+          Signals{" "}
           {p.scores && <span className="score-value">{p.scores.takeover_score ?? 0}<span className="muted"> of {p.groups.reduce((n, g) => n + g.signals.length, 0)}</span></span>}
         </h2>
       </section>
 
-      {p.groups.map((g) => (
-        <section key={g.key} aria-labelledby={`${g.key}-h`}>
-          <h3 id={`${g.key}-h`} className="group-h">
-            {g.label}{" "}
-            {p.scores && <span className="muted">{g.signals.filter((k) => p.scores![k] === true).length} of {g.signals.length}</span>}
-          </h3>
-          <SignalGrid keys={g.signals} scores={p.scores} marketCap={co.market_cap} />
-        </section>
-      ))}
+      {(() => {
+        const all = p.groups.flatMap((g) => g.signals);
+        const fired = all.filter((k) => p.scores?.[k] === true), rest = all.filter((k) => p.scores?.[k] !== true);
+        return (
+          <section aria-label="Signals">
+            {fired.length > 0 ? <SignalGrid keys={fired} scores={p.scores} marketCap={co.market_cap} /> : <p className="muted">No signals fired.</p>}
+            {rest.length > 0 && (
+              <details className="other-signals">
+                <summary>{rest.length} other checks</summary>
+                <SignalGrid keys={rest} scores={p.scores} marketCap={co.market_cap} />
+              </details>
+            )}
+          </section>
+        );
+      })()}
 
         <section id="financials">
           <h2>Financials</h2>
@@ -355,38 +361,23 @@ const BUSINESS_ROWS: [string, string][] = [
   ["fragmented_market", "Fragmented market"],
 ];
 
-// The AI-rollup buyout model (sponsor-model.ts): odds of a private-equity,
-// holdco or rollup buyer acquiring the company, as a services business,
-// within 12 months.
+// The AI-rollup buyout model (sponsor-model.ts), relative to the average
+// company: how much more likely a private-equity firm, holdco or AI rollup
+// is to buy it, as a services business.
 function SponsorOdds({ s }: { s: Record<string, unknown> }) {
-  const prob = Number(s.sponsor_prob), mult = Number(s.sponsor_multiple), pctile = Number(s.sponsor_percentile);
+  const mult = Number(s.sponsor_multiple);
+  const scores = BUSINESS_ROWS.filter(([k]) => s[k] != null);
   return (
     <section aria-labelledby="sponsor-h" className="sponsor">
-      <h2 id="sponsor-h">
-        AI-rollup buyout odds{" "}
-        <span className="score-value">{(prob * 100).toFixed(1)}%<span className="muted"> next 12 months</span></span>
-      </h2>
-      <p className="muted">
-        {mult.toFixed(1)}× the average company · higher than {Math.min(99, Math.floor(pctile * 100))}% of the universe.
-        A private-equity firm, holdco or AI-rollup buyer acquiring it as a services business, from a model backtested on 2018–2024.
-        <Link href="/deals#model"> How it works</Link>
-      </p>
+      <h2 id="sponsor-h" className="sponsor-h" data-high={mult >= 3}>{likelihoodPhrase(mult)} to be bought by an AI rollup</h2>
       {s.business_summary != null && (
-        <div className="business">
-          <p>
-            <strong>From its 10-K:</strong> {String(s.business_summary)}
-            {s.business_filing_date != null && <span className="muted"> (filed {fmtDate(String(s.business_filing_date))})</span>}
-          </p>
-          <dl className="business-scores">
-            {BUSINESS_ROWS.filter(([k]) => s[k] != null).map(([k, label]) => (
-              <div key={k}>
-                <dt>{label}</dt>
-                <dd><Meter value={Number(s[k])} threshold={k === "recurring_revenue" ? 7 : k === "rollup_fit" ? 5 : 10} max={10}
-                  fired={(k === "recurring_revenue" && Number(s[k]) >= 7) || (k === "rollup_fit" && Number(s[k]) >= 5)} label={`${label}: ${Number(s[k])} of 10`} /> {Number(s[k])}<span className="muted">/10</span></dd>
-              </div>
-            ))}
-          </dl>
-        </div>
+        <p className="muted">
+          {String(s.business_summary)}{" "}
+          {scores.length > 0 && <span className="business-line">
+            {scores.map(([k, label], i) => <span key={k}>{i > 0 && " · "}{label} <strong>{Number(s[k])}</strong>/10</span>)}
+          </span>}{" "}
+          <Link href="/deals#model">How it works</Link>
+        </p>
       )}
     </section>
   );
