@@ -30,6 +30,12 @@ interface Deal {
   pre_score: number | null;
   buyer_type: string | null;
   target_business: string | null;
+  rollup_buyer: string | null;
+}
+
+interface ScoreRow {
+  ticker: string; name: string; announced: string; buyer: string | null; buyer_type: string | null; rollup_buyer: string | null;
+  services_business: boolean | null; probability: number; multiple: number; percentile: number; inputs_before: boolean | null; in_training: boolean;
 }
 
 interface Backtest {
@@ -60,10 +66,15 @@ export default async function Deals({ searchParams }: { searchParams: Promise<{ 
   const thisYear = new Date().getUTCFullYear();
   const asked = Number((await searchParams).year);
   const year = asked >= FIRST_YEAR && asked <= thisYear ? asked : thisYear;
-  const [{ rows }, bt] = await Promise.all([
+  const [{ rows }, bt, sc] = await Promise.all([
     api<{ rows: Deal[] }>(`/deals?year=${year}`),
     api<Backtest>("/backtest"),
+    api<{ rows: ScoreRow[] }>("/scorecard"),
   ]);
+  // Out-of-sample deals the model scored from filings made before the announcement.
+  const live = sc.rows.filter((r) => !r.in_training && r.inputs_before !== false);
+  const liveRollup = live.filter((r) => r.rollup_buyer || (SPONSORISH.has(r.buyer_type ?? "") && r.services_business));
+  const top10 = (xs: ScoreRow[]) => xs.filter((r) => r.percentile >= 0.9).length;
   const years = Array.from({ length: thisYear - FIRST_YEAR + 1 }, (_, i) => thisYear - i);
   const topScore = Math.max(...bt.scores.map((s) => s.n ? s.deals / s.n : 0), bt.base_rate, 1e-9);
 
@@ -89,6 +100,37 @@ export default async function Deals({ searchParams }: { searchParams: Promise<{ 
             that as a rough figure. Being a services business, smaller size, AI-rollup fit and goodwill from past acquisitions carry most of
             the weight.
           </p>
+        </section>
+      )}
+
+      {live.length > 0 && (
+        <section className="backtest" id="scorecard" aria-labelledby="sc-h">
+          <h2 id="sc-h">Scorecard: deals since the model was trained</h2>
+          <p className="muted page-lede">
+            Every company agreeing to be acquired since April 2026, after the last deal the model learned from, with where the model
+            ranked it among {bt.sponsor ? "the universe" : "all companies"} using filings made before the announcement.
+            {liveRollup.length > 0 && <> {top10(liveRollup)} of {liveRollup.length} AI-rollup-style buyouts were in the model&rsquo;s top tenth.</>}
+            {" "}{top10(live)} of {live.length} deals of any kind were.
+          </p>
+          <div className="table-wrap">
+            <table className="data rows-hover">
+              <thead>
+                <tr><th>Announced</th><th>Company</th><th>Buyer</th><th className="hide-narrow">Type</th><th className="num">Model rank</th><th className="num hide-narrow">Odds vs. average</th></tr>
+              </thead>
+              <tbody>
+                {live.map((r) => (
+                  <tr key={r.ticker}>
+                    <td className="date muted">{fmtDate(r.announced)}</td>
+                    <td><TickerName ticker={r.ticker} name={r.name} /></td>
+                    <td>{r.rollup_buyer ?? r.buyer ?? "—"}{r.rollup_buyer && <> <span className="tag">AI rollup</span></>}</td>
+                    <td className="hide-narrow muted">{r.buyer_type && BUYER_TYPE[r.buyer_type] ? BUYER_TYPE[r.buyer_type] : "—"}{r.services_business ? " · services" : ""}</td>
+                    <td className="num" data-high={r.percentile >= 0.9}>Top {Math.max(1, Math.ceil((1 - r.percentile) * 100))}%</td>
+                    <td className="num hide-narrow">{r.multiple.toFixed(1)}×</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 
@@ -182,7 +224,8 @@ export default async function Deals({ searchParams }: { searchParams: Promise<{ 
                     <TickerName ticker={d.ticker} name={d.name} />
                   </td>
                   <td data-slot="form"><a href={d.document_url} rel="noopener">{d.form}</a></td>
-                  <td data-slot="by">{d.acquirer && d.acquirer_slug ? <Link href={`/acquirers/${d.acquirer_slug}`}>{d.acquirer}</Link> : d.acquirer ?? <span className="muted">{d.matched_buyer ? `Mentions ${d.matched_buyer}` : "—"}</span>}</td>
+                  <td data-slot="by">{d.acquirer && d.acquirer_slug ? <Link href={`/acquirers/${d.acquirer_slug}`}>{d.acquirer}</Link> : d.acquirer ?? <span className="muted">—</span>}
+                    {d.rollup_buyer && <> <span className="tag">AI rollup</span></>}</td>
                   <td className="hide-narrow">{d.buyer_type && BUYER_TYPE[d.buyer_type]
                     ? <span className={SPONSORISH.has(d.buyer_type) ? "tag" : "muted"} title={d.target_business ?? undefined}>{BUYER_TYPE[d.buyer_type]}</span>
                     : <span className="muted">—</span>}</td>

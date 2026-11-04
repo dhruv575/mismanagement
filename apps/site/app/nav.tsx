@@ -12,6 +12,7 @@ export function Nav() {
   return (
     <nav className="nav" aria-label="Primary">
       <Search />
+      <Link href="/rollups" aria-current={path === "/rollups" ? "page" : undefined}>Rollups</Link>
       <Link href="/deals" aria-current={path === "/deals" ? "page" : undefined}>Deals</Link>
       <Link href="/acquirers" aria-current={path.startsWith("/acquirers") ? "page" : undefined}>Acquirers</Link>
     </nav>

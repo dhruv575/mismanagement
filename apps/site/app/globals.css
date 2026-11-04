@@ -1067,3 +1067,7 @@ h1 .tk-name {
 .business-scores .meter { flex: 1; }
 .odds { font-variant-numeric: tabular-nums; }
 .odds[data-high="true"] { color: var(--hit-strong); font-weight: 600; }
+
+/* Rollups page */
+.buyer-note { margin: .75rem 0 1rem; color: var(--text-secondary); }
+.buyer-note .tag { margin-inline: .25rem; }

@@ -24,10 +24,12 @@ const arg = (k: string, d: string) => process.argv.find((a) => a.startsWith(`--$
 const MODEL = arg("model", "anthropic/claude-haiku-5.5");
 
 // This runs beside the 10-K pulls, so it keeps well under EDGAR's 10 req/s.
-let lastFetch = 0;
+let lastFetch = 0, paceMs = 1000;
+/** Milliseconds between EDGAR requests; 1000 leaves room for other pulls. */
+export function setSecPace(ms: number): void { paceMs = ms; }
 async function secPrefix(url: string, bytes: number): Promise<string> {
   for (let attempt = 0; ; attempt++) {
-    const slot = Math.max(Date.now(), lastFetch + 1000);
+    const slot = Math.max(Date.now(), lastFetch + paceMs);
     lastFetch = slot;
     if (slot > Date.now()) await new Promise((r) => setTimeout(r, slot - Date.now()));
     try {
@@ -62,7 +64,9 @@ const DealClass = z.object({
   reason: z.string().catch(""),
 });
 
-const PROMPT = `You classify US public-company acquisitions from the opening of the deal document (merger proxy, going-private schedule, or tender offer).
+const PROMPT = `You classify US public-company acquisitions from the opening of the deal document (merger proxy, going-private schedule, tender offer, or an 8-K announcing a merger agreement).
+
+The "Filer" named before the text is the public company whose filing this is. For an 8-K the filer may be the buyer rather than the target: set issuer_acquired to true only when the filer itself is being acquired, and describe the filer's business in target_business either way.
 
 We care about deals that resemble an "AI rollup": a financial buyer or holding company (private equity, a sponsor-backed platform, a permanent-capital holdco, or an AI-native rollup vehicle such as Long Lake or Thrive Holdings) acquiring a services business whose costs are mostly people doing repeatable knowledge or process work (accounting, IT services, BPO and call centers, insurance brokerage and claims, healthcare administration and revenue cycle, staffing, legal and compliance services, property management, marketing services, payroll/HR services, logistics brokerage, engineering services), intending to lift margins with software/automation and add-on acquisitions.
 
@@ -79,16 +83,17 @@ Answer from the text. Return JSON only:
   "reason": string                   // under 25 words
 }`;
 
-async function main(): Promise<void> {
-  const concurrency = parseInt(arg("concurrency", "6"), 10);
+export async function ensureDealClass(): Promise<void> {
   await pool.query(`create table if not exists deal_class (
     accession_number text primary key, model text not null, buyer text, buyer_type text,
     issuer_acquired boolean, target_business text, services_business boolean, labor_intensive boolean,
     rollup_fit real, reason text, classified_at timestamptz not null default now())`);
-  const scope = process.argv.includes("--all")
-    ? `select distinct on (d.cik) d.accession_number from deal_filings d
-        where not d.is_self_filed and d.form <> '8-K' and d.issuer_acquired is not false order by d.cik, d.filing_date`
-    : `select event_accession as accession_number from backtest_panel where event_accession is not null`;
+}
+
+/** Classify every deal filing selected by `scope` (a query returning
+ *  accession_number) that isn't classified yet. */
+export async function classifyDeals(scope: string, concurrency = 6): Promise<number> {
+  await ensureDealClass();
   const rows = (await pool.query<{ accession_number: string; document_url: string; form: string; name: string; sic_description: string | null; acquirer: string | null }>(
     `select d.accession_number, d.document_url, d.form, c.name, c.sic_description, d.acquirer
        from deal_filings d left join companies c using (cik)
@@ -103,7 +108,7 @@ async function main(): Promise<void> {
       try {
         const raw = await secPrefix(r.document_url, 1_500_000);
         const text = htmlToText(raw.slice(Math.max(0, raw.indexOf("<DOCUMENT>")))).replace(/\s+/g, " ").slice(0, 30_000);
-        const header = `Form ${r.form}. Target: ${r.name ?? "?"} (${r.sic_description ?? "industry unknown"}).` +
+        const header = `Form ${r.form}. Filer: ${r.name ?? "?"} (${r.sic_description ?? "industry unknown"}).` +
           (r.acquirer ? ` Acquirer named in our data: ${r.acquirer}.` : "");
         const { json } = await callLLM({ model: MODEL, systemPrompt: PROMPT, userPrompt: `${header}\n\n${text}`, maxTokens: 1000 });
         const c = DealClass.parse(json);
@@ -119,6 +124,19 @@ async function main(): Promise<void> {
     }
   };
   await Promise.all(Array.from({ length: concurrency }, worker));
+  return rows.length;
+}
+
+async function main(): Promise<void> {
+  const concurrency = parseInt(arg("concurrency", "6"), 10);
+  const since = process.argv.find((a) => a.startsWith("--since="))?.split("=")[1];
+  const scope = since
+    ? `select accession_number from deal_filings where not is_self_filed and filing_date >= '${since.replace(/[^0-9-]/g, "")}'`
+    : process.argv.includes("--all")
+    ? `select distinct on (d.cik) d.accession_number from deal_filings d
+        where not d.is_self_filed and d.form <> '8-K' and d.issuer_acquired is not false order by d.cik, d.filing_date`
+    : `select event_accession as accession_number from backtest_panel where event_accession is not null`;
+  await classifyDeals(scope, concurrency);
   const s = await pool.query(`select buyer_type, count(*)::int n, round(avg(rollup_fit)::numeric, 1) fit,
       count(*) filter (where services_business and labor_intensive)::int services_labor
     from deal_class group by 1 order by 2 desc`);
@@ -126,4 +144,5 @@ async function main(): Promise<void> {
   await pool.end();
 }
 
-await main();
+const isMain = process.argv[1]?.replace(/\\/g, "/").endsWith("classify-deals.ts");
+if (isMain) await main();

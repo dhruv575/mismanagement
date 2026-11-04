@@ -16,6 +16,7 @@ interface Row {
   takeover_score?: number;
   sponsor_prob?: number;
   sponsor_multiple?: number;
+  deal_pending?: boolean;
   [signal: string]: unknown;
 }
 interface Board {
@@ -115,6 +116,7 @@ export default async function Home() {
                         <td className="num muted">{i + 1}</td>
                         <td>
                           <TickerName ticker={r.ticker} name={r.name} />
+                          {r.deal_pending && <> <span className="tag" title="Agreed to be acquired in the last 12 months">Deal pending</span></>}
                         </td>
                         <td className="hide-narrow muted">{r.sic_description ?? "—"}</td>
                         <td className="num hide-narrow">{fmtUsd(r.market_cap)}</td>

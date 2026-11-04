@@ -1,22 +1,22 @@
-// The pixel mark: a skyscraper caught in crosshair brackets, on a 16x16
+// The pixel mark: a big fish about to swallow a small one, on a 16x16
 // grid. Same grid as app/icon.svg (generated from it). Render at multiples
 // of 16px so every pixel stays square.
 const GRID = [
   ".IIIIIIIIIIIIII.",
-  "IYYYIIIYIIIIYYYI",
-  "IYIIIIIWIIIIIIYI",
-  "IYIIIIIWIIIIIIYI",
-  "IIIIIWWWWWNIIIII",
-  "IIIIWWWWWWWNIIII",
-  "IIIIWNWNWYWNIIII",
-  "IIIIWWWWWWWNIIII",
-  "IIIIWYWNWNWNIIII",
-  "IIIIWWWWWWWNIIII",
-  "IIIIWNWYWNWNIIII",
-  "IIIIWWWWWWWNIIII",
-  "IYIIWWWNNWWNIIYI",
-  "IYIIWWWNNWWNIIYI",
-  "IYYYIIIIIIIIYYYI",
+  "IIIIIIIIIIIIIIII",
+  "IIIIIIWWWWIIIIII",
+  "IIIIWWWWWWWIIIWI",
+  "IIIWWNWWWWWWIWWI",
+  "IIWWWWWWWWWWWWWI",
+  "IIIYIIWWWWWWWWII",
+  "IYYIIIIWWWWWWIII",
+  "IYYIIIIWWWWWWIII",
+  "IIIYIIWWWWWWWWII",
+  "IIWWWWWWWWWWWWWI",
+  "IIIWWWWWWWWWIWWI",
+  "IIIIWWWWWWWIIIWI",
+  "IIIIIIWWWWIIIIII",
+  "IIIIIIIIIIIIIIII",
   ".IIIIIIIIIIIIII.",
 ];
 const COLORS: Record<string, string> = { I: "#4338ca", N: "#1e1b4b", W: "#ffffff", Y: "#fbbf24" };

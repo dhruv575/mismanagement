@@ -328,7 +328,10 @@ app.get("/companies/:ticker/profile", async (c) => {
     ),
     pool().query(`select ts.*, ${SCORE_SQL} as takeover_score,
         coalesce(ss.signal_recurring_revenue, false) as signal_recurring_revenue, coalesce(ss.signal_rollup_shape, false) as signal_rollup_shape,
-        ss.probability as sponsor_prob, ss.multiple as sponsor_multiple, ss.percentile as sponsor_percentile,
+        ss.probability as sponsor_prob, ss.multiple as sponsor_multiple,
+      exists (select 1 from deal_filings d join deal_class dc using (accession_number)
+               where d.cik = ts.cik and dc.issuer_acquired and not d.is_self_filed
+                 and d.filing_date > now() - interval '12 months') as deal_pending, ss.percentile as sponsor_percentile,
         cb.services_share, cb.labor_intensity, cb.ai_automatable, cb.fragmented_market, cb.recurring_revenue, cb.rollup_fit,
         cb.summary as business_summary, cb.filing_date::text as business_filing_date, cb.accession_number as business_accession
       from takeover_scores ts left join sponsor_scores ss using (cik) left join current_business cb using (cik) where ts.cik = $1`, [cik]),
@@ -343,10 +346,14 @@ app.get("/companies/:ticker/profile", async (c) => {
       [cik],
     ),
     pool().query(
-      `select accession_number, form, filing_date::text as filing_date, acquirer, matched_buyer,
-              price_per_share, premium_pct, document_url
-         from deal_filings where cik = $1 and not is_self_filed and (form <> '8-K' or matched_buyer is not null)
-        order by filing_date desc limit 20`,
+      `select d.accession_number, d.form, d.filing_date::text as filing_date,
+              coalesce(rb.name, case when dc.issuer_acquired then dc.buyer end, d.acquirer) as acquirer, null::text as matched_buyer,
+              d.price_per_share, d.premium_pct, d.document_url
+         from deal_filings d
+         left join deal_class dc on dc.accession_number = d.accession_number
+         left join rollup_buyers rb on rb.slug = d.rollup_buyer
+        where d.cik = $1 and not d.is_self_filed and dc.issuer_acquired is not false and (d.form <> '8-K' or dc.issuer_acquired)
+        order by d.filing_date desc limit 20`,
       [cik],
     ),
     pool().query(
@@ -429,16 +436,19 @@ app.get("/deals", async (c) => {
   const year = Number(c.req.query("year")) || null;
   const r = await pool().query(
     `select d.accession_number, c.ticker, c.name, d.form, d.filing_date::text as filing_date,
-            d.acquirer, d.matched_buyer, d.price_per_share, d.premium_pct, d.document_url,
+            coalesce(rb.name, case when dc.issuer_acquired then dc.buyer end, d.acquirer) as acquirer,
+            null::text as matched_buyer, d.price_per_share, d.premium_pct, d.document_url,
             pre.pre_score, coalesce(c.is_russell_3000, false) as in_universe,
-            dc.buyer_type, dc.target_business, dc.rollup_fit as deal_rollup_fit
+            dc.buyer_type, dc.target_business, dc.rollup_fit as deal_rollup_fit, rb.name as rollup_buyer
        from deal_filings d join companies c on c.cik = d.cik
        left join deal_class dc on dc.accession_number = d.accession_number
+       left join rollup_buyers rb on rb.slug = d.rollup_buyer
        left join lateral (
          select p.score as pre_score from backtest_panel p
           where p.cik = d.cik and p.as_of < d.filing_date and p.as_of >= d.filing_date - interval '15 months'
           order by p.as_of desc limit 1) pre on true
-      where not d.is_self_filed and (d.form <> '8-K' or d.matched_buyer is not null)
+      where not d.is_self_filed and dc.issuer_acquired is not false
+        and (d.form <> '8-K' or dc.issuer_acquired)
         and ($1::int is null or extract(year from d.filing_date) = $1::int)
       order by d.filing_date desc
       limit 2000`,
@@ -478,19 +488,22 @@ interface AcqDeal {
 async function acquirerDeals(): Promise<Map<string, { name: string; deals: AcqDeal[] }>> {
   const r = await pool().query<AcqDeal>(
     `select d.accession_number, c.ticker, c.name, d.form, d.filing_date::text as filing_date,
-            coalesce(d.acquirer, d.matched_buyer) as buyer,
-            (d.matched_buyer is not null and (d.acquirer is null or d.acquirer ilike '%' || d.matched_buyer || '%')) as ai_rollup,
-            (d.acquirer is null) as mention,
+            coalesce(rb.name, case when dc.issuer_acquired then dc.buyer end, d.acquirer) as buyer,
+            (d.rollup_buyer is not null) as ai_rollup,
+            false as mention,
             d.price_per_share, d.premium_pct, d.document_url, s.takeover_score, pre.pre_score
        from deal_filings d
        join companies c on c.cik = d.cik
        left join takeover_scores s on s.cik = d.cik
+       left join deal_class dc on dc.accession_number = d.accession_number
+       left join rollup_buyers rb on rb.slug = d.rollup_buyer
        left join lateral (
          select p.score as pre_score from backtest_panel p
           where p.cik = d.cik and p.as_of < d.filing_date and p.as_of >= d.filing_date - interval '15 months'
           order by p.as_of desc limit 1) pre on true
-      where not d.is_self_filed and coalesce(d.acquirer, d.matched_buyer) is not null
-        and (d.form <> '8-K' or d.matched_buyer is not null)
+      where not d.is_self_filed and dc.issuer_acquired is not false
+        and coalesce(rb.name, case when dc.issuer_acquired then dc.buyer end, d.acquirer) is not null
+        and (d.form <> '8-K' or dc.issuer_acquired)
       order by d.filing_date desc`,
   );
   const groups = new Map<string, { names: Map<string, number>; deals: AcqDeal[] }>();
@@ -512,6 +525,63 @@ async function acquirerDeals(): Promise<Map<string, { name: string; deals: AcqDe
   }
   return out;
 }
+
+// /rollups — AI-rollup and holdco acquisitions: private deals extracted from
+// news headlines (track-news.ts, rollup_deals) and public take-privates from
+// SEC filings (track-deals.ts, deal_filings.rollup_buyer), plus the buyer
+// registry with counts.
+app.get("/rollups", async (c) => {
+  const [buyers, news, dups, sec] = await Promise.all([
+    pool().query<Record<string, any>>(`select slug, name, kind, note from rollup_buyers order by name`),
+    pool().query<Record<string, any>>(`select id, buyer, buyer_slug, target, target_sector, announced::text as announced, sources
+                    from rollup_deals where confidence >= 0.6 and duplicate_of is null order by announced desc, created_at desc limit 500`),
+    pool().query<Record<string, any>>(`select duplicate_of, sources from rollup_deals where duplicate_of is not null`),
+    pool().query<Record<string, any>>(`select distinct on (d.cik) d.cik, c.ticker, c.name as target, rb.slug as buyer_slug, rb.name as buyer,
+                         dc.target_business as target_sector, d.filing_date::text as announced, d.document_url, d.form
+                    from deal_filings d join companies c using (cik) join rollup_buyers rb on rb.slug = d.rollup_buyer
+                    left join deal_class dc on dc.accession_number = d.accession_number
+                   order by d.cik, d.filing_date`),
+  ]).catch(() => [{ rows: [] }, { rows: [] }, { rows: [] }, { rows: [] }] as { rows: Record<string, any>[] }[]);
+  // Folded duplicates contribute their news links to the row they point at.
+  const extra = new Map<string, Record<string, any>[]>();
+  for (const d of dups.rows) extra.set(d.duplicate_of, [...(extra.get(d.duplicate_of) ?? []), ...d.sources]);
+  // One feed, newest first. A public deal also reported in the news keeps
+  // its SEC row (which links the filing) and drops the news duplicate.
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/(inc|corp|holdings|group|ltd|llc)$/g, "");
+  const secKeys = new Set(sec.rows.map((r) => `${r.buyer_slug}:${norm(r.target).slice(0, 8)}`));
+  const deals: Record<string, any>[] = [
+    ...sec.rows.map((r) => ({ ...r, kind: "public" as const,
+      sources: [{ title: `${r.form} filing`, outlet: "SEC EDGAR", url: r.document_url }, ...(extra.get(`public:${r.cik}`) ?? [])] })),
+    ...news.rows.filter((r) => !secKeys.has(`${r.buyer_slug}:${norm(r.target).slice(0, 8)}`))
+      .map((r) => ({ ...r, kind: "private" as const, sources: [...r.sources, ...(extra.get(r.id) ?? [])] })),
+  ].sort((a: Record<string, any>, b: Record<string, any>) => String(b.announced).localeCompare(String(a.announced)));
+  const counts = new Map<string, { deals: number; latest: string | null }>();
+  for (const d of deals) {
+    const k = counts.get(d.buyer_slug) ?? { deals: 0, latest: null };
+    k.deals++; if (!k.latest || d.announced > k.latest) k.latest = d.announced;
+    counts.set(d.buyer_slug, k);
+  }
+  c.header("Cache-Control", STABLE_CACHE);
+  return c.json({
+    buyers: buyers.rows.map((b) => ({ ...b, ...(counts.get(b.slug) ?? { deals: 0, latest: null }) }))
+      .sort((a, b) => b.deals - a.deals || String(b.latest).localeCompare(String(a.latest))),
+    deals,
+  });
+});
+
+// /scorecard — the AI-rollup model's record on deals announced since 2025
+// (rollup_scorecard, written by track-deals.ts when a deal first appears).
+app.get("/scorecard", async (c) => {
+  const r = await pool().query(
+    `select c.ticker, c.name, k.announced::text as announced, k.buyer, k.buyer_type, rb.name as rollup_buyer,
+            k.services_business, k.probability, k.multiple, k.percentile, k.inputs_before, k.in_training
+       from rollup_scorecard k join companies c using (cik) left join rollup_buyers rb on rb.slug = k.rollup_buyer
+      where k.percentile is not null
+      order by k.announced desc`,
+  ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+  c.header("Cache-Control", STABLE_CACHE);
+  return c.json({ rows: r.rows });
+});
 
 app.get("/acquirers", async (c) => {
   const groups = await acquirerDeals();
@@ -681,6 +751,9 @@ app.get("/leaderboard", async (c) => {
       c.market_cap_at_universe_pull as market_cap,
       ${SCORE_SQL} as takeover_score,
       ss.probability as sponsor_prob, ss.multiple as sponsor_multiple,
+      exists (select 1 from deal_filings d join deal_class dc using (accession_number)
+               where d.cik = ts.cik and dc.issuer_acquired and not d.is_self_filed
+                 and d.filing_date > now() - interval '12 months') as deal_pending,
       ${SIGNAL_GROUPS.flatMap((g) => g.signals.map(signalSql)).join(", ")},
       count(*) over() as total
     from takeover_scores ts

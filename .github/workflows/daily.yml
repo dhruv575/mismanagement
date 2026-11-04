@@ -1,0 +1,53 @@
+name: Daily update
+
+# After EDGAR's daily index settles (~10-11pm US Eastern). Every step is
+# incremental and safe to re-run; run it by hand from the Actions tab.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: daily-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+      EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm migrate
+
+      # New deals: merger-agreement 8-Ks (last 14 days), classification,
+      # AI-rollup buyer tags, scorecard.
+      - name: Track SEC deals
+        run: pnpm --filter @takeover/ingest track-deals
+      # Rollup acquisitions from Google News RSS (last 3 days).
+      - name: Track rollup news
+        run: pnpm --filter @takeover/ingest track-news
+      # Acquirer, price and premium on new proxies and tender offers.
+      - name: Enrich deal filings
+        run: pnpm pull-deals --enrich
+      - name: Refresh scores
+        run: pnpm refresh
+
+      # Weekly (Sundays): re-read 10-Ks filed since the last run. Daily:
+      # re-apply the model to the latest inputs.
+      - name: Score new 10-Ks
+        run: |
+          if [ "$(date -u +%u)" = "7" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            pnpm --filter @takeover/ingest sponsor-model --score-10k
+          fi
+      - name: Apply AI-rollup model
+        run: pnpm --filter @takeover/ingest sponsor-model --apply

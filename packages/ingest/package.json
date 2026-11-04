@@ -24,6 +24,8 @@
     "classify-deals": "tsx src/classify-deals.ts",
     "score-business": "tsx src/score-business.ts",
     "experiment": "tsx src/experiment.ts",
+    "track-deals": "tsx src/track-deals.ts",
+    "track-news": "tsx src/track-news.ts",
     "fit-model": "tsx src/fit-model.ts",
     "screen": "tsx src/screen.ts",
     "typecheck": "tsc --noEmit"
