@@ -206,11 +206,7 @@ export async function CompanyView({ ticker, side }: { ticker: string; side: Side
           {p.insiders_365d.buy_count + p.insiders_365d.sell_count === 0 ? (
             <p className="muted">No open-market trades in the last 12 months.</p>
           ) : (
-            <dl className="stat-row">
-              <Fact label="Open-market buys, 12 mo" value={`${fmtUsd(p.insiders_365d.buys)} · ${p.insiders_365d.buy_count}`} />
-              <Fact label="Open-market sells, 12 mo" value={`${fmtUsd(p.insiders_365d.sells)} · ${p.insiders_365d.sell_count}`} />
-              <Fact label="Net" value={fmtUsd(p.insiders_365d.buys - p.insiders_365d.sells)} />
-            </dl>
+            <Insiders t={p.insiders_365d} />
           )}
         </section>
 
@@ -294,15 +290,6 @@ function TrendStat({ label, value, title, delta, spark, sub }: {
         {spark && <span className="stat-spark">{spark}</span>}
       </dd>
       {(delta || sub) && <dd className="stat-sub">{delta}{sub && <span className="muted">{sub}</span>}</dd>}
-    </div>
-  );
-}
-
-function Fact({ label, value, title }: { label: string; value: string; title?: string }) {
-  return (
-    <div className="fact">
-      <dt>{label}</dt>
-      <dd title={title}>{value}</dd>
     </div>
   );
 }
@@ -422,4 +409,28 @@ function topShare(pct: number): string {
 function bare(mult: number): string {
   const s = likelihoodPhrase(mult).replace(/^[0-9.]+× /, "");
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// Open-market buys against sells over 12 months: one bar each, same scale.
+function Insiders({ t }: { t: Profile["insiders_365d"] }) {
+  const top = Math.max(t.buys, t.sells, 1);
+  const net = t.buys - t.sells;
+  const row = (label: string, v: number, n: number, kind: "buy" | "sell") => (
+    <li className="ins-row" data-kind={kind}>
+      <span className="ins-label">{label}</span>
+      <span className="ins-track" aria-hidden="true"><span style={{ width: `${Math.max((v / top) * 100, v ? 1.5 : 0)}%` }} /></span>
+      <span className="ins-v">{fmtUsd(v)}<span className="muted"> · {n} {n === 1 ? "trade" : "trades"}</span></span>
+    </li>
+  );
+  return (
+    <div className="insiders">
+      <ul aria-label="Open-market insider trades, last 12 months">
+        {row("Bought", t.buys, t.buy_count, "buy")}
+        {row("Sold", t.sells, t.sell_count, "sell")}
+      </ul>
+      <p className="muted ins-net">
+        Net {net >= 0 ? "buying" : "selling"} of <strong className={net >= 0 ? "pos" : "neg"}>{fmtUsd(Math.abs(net))}</strong> in open-market trades over the last 12 months.
+      </p>
+    </div>
+  );
 }

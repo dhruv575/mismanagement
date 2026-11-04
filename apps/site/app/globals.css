@@ -1172,3 +1172,17 @@ h1 .tk-name {
 @media (max-width: 560px) { .signals-count { align-items: flex-start; } }
 .nav a.side-toggle { padding: 3px; border-radius: 999px; margin-left: 8px; }
 .nav a.side-toggle:hover { background: var(--surface-3); }
+
+/* Insider trading: buys vs sells on one scale. */
+.insiders ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .625rem; max-width: 40rem; }
+.ins-row { display: grid; grid-template-columns: 4.5rem 1fr 11rem; gap: .875rem; align-items: center; }
+.ins-label { color: var(--text-secondary); }
+.ins-track { height: 10px; border-radius: 5px; background: var(--meter-track); overflow: hidden; }
+.ins-track > span { display: block; height: 100%; border-radius: 5px; }
+.ins-row[data-kind="buy"] .ins-track > span { background: var(--pos); }
+.ins-row[data-kind="sell"] .ins-track > span { background: var(--neg); }
+.ins-v { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.ins-net { margin: .875rem 0 0; }
+.ins-net .pos { color: var(--pos); }
+.ins-net .neg { color: var(--neg); }
+@media (max-width: 560px) { .ins-row { grid-template-columns: 3.75rem 1fr; } .ins-v { grid-column: 2; text-align: left; } }
