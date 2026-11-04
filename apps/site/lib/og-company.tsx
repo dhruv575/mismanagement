@@ -43,7 +43,7 @@ export async function companyImage(ticker: string, side: Side) {
         </div>
         <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginTop: 22 }}>
           <div style={{ display: "flex", fontSize: 44, fontWeight: 600, color: side === "angel" ? C.hit : "#dc2626" }}>{mult != null ? fmtMultiple(mult) : "—"}</div>
-          <div style={{ display: "flex", fontSize: 30, color: C.dim }}>{headline.replace(/^\S+ /, "")}</div>
+          <div style={{ display: "flex", fontSize: 30, color: C.dim }}>{headline.replace(/^[0-9.]+× /, "")}</div>
         </div>
         {summary && <div style={{ display: "flex", fontSize: 24, color: C.dim, marginTop: 18, maxHeight: 96, overflow: "hidden" }}>{summary.length > 200 ? `${summary.slice(0, 197)}…` : summary}</div>}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 18 }}>
