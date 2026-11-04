@@ -345,7 +345,7 @@ function SponsorOdds({ s }: { s: Record<string, unknown> }) {
       <div className="verdict-num">{fmtMultiple(mult)}</div>
       <div>
         <h2 id="sponsor-h">{likelihoodPhrase(mult)} to be bought by an AI rollup</h2>
-        <p className="muted">{pct != null && <>More likely than {Math.round(pct <= 1 ? pct * 100 : pct)}% of Russell 3000 companies. </>}<Link href="/deals#model">How it works</Link></p>
+        <p className="muted">{pct != null && <>Top {topShare(pct)} of the Russell 3000. </>}<Link href="/deals#model">How it works</Link></p>
       </div>
       {s.business_summary != null && <p className="verdict-summary">{String(s.business_summary)}</p>}
       {scores.length > 0 && (
@@ -390,4 +390,10 @@ function DealTable({ deals }: { deals: Profile["deals"] }) {
       </div>
     </section>
   );
+}
+
+// Percentile (0-1) as a "top N%" share: 0.9998 -> "1%", never "0%".
+function topShare(pct: number): string {
+  const top = (1 - pct) * 100;
+  return top < 1 ? "1%" : `${Math.round(top)}%`;
 }
