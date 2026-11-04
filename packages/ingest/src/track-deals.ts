@@ -31,9 +31,12 @@ const TRAINED_THROUGH = "2026-04-01";
 // AI-rollup and holdco buyers. Aliases are matched case-insensitively
 // against the buyer the deal document names, including the shell
 // companies buyers acquire through.
-const ROLLUP_BUYERS: { slug: string; name: string; aliases: string[]; kind: string; note: string }[] = [
+// queries: Google News searches for track-news.ts when the name alone is
+// ambiguous or the buyer's private deals are drowned out by one big story.
+const ROLLUP_BUYERS: { slug: string; name: string; aliases: string[]; kind: string; note: string; queries?: string[] }[] = [
   { slug: "long-lake", name: "Long Lake", aliases: ["Long Lake", "Gaia Purchaser", "Gaia Parent"], kind: "AI holding company",
-    note: "Buys services businesses and runs them with AI; HOA management, payroll, business travel (Amex GBT, 2026)." },
+    note: "Buys services businesses and runs them with AI; HOA management, payroll, business travel (Amex GBT, 2026).",
+    queries: [`"Long Lake" acquires`, `"Long Lake" HOA management`, `"Long Lake" association management acquisition`, `"Long Lake" payroll acquisition`] },
   { slug: "thrive-holdings", name: "Thrive Holdings", aliases: ["Thrive Holdings"], kind: "AI holding company",
     note: "Thrive Capital's permanent-capital vehicle, backed by OpenAI; accounting, IT services, built environment, ADT (2026)." },
   { slug: "general-catalyst", name: "General Catalyst", aliases: ["General Catalyst", "Transcarent"], kind: "Venture firm, creation-to-rollup strategy",
@@ -42,10 +45,28 @@ const ROLLUP_BUYERS: { slug: string; name: string; aliases: string[]; kind: stri
     note: "Technology and media holdco; taking Bumble private (2026)." },
   { slug: "sequence-ai-holdings", name: "Sequence AI Holdings", aliases: ["Sequence AI"], kind: "AI holding company",
     note: "Taking Baldwin Insurance Group (insurance brokerage) private (2026)." },
+  { slug: "ode-with-anthropic", name: "Ode with Anthropic", aliases: ["Ode with Anthropic", "AI-Native Enterprise Services Firm Backed by Anthropic", "AI Native Enterprise Services Firm Backed by Anthropic"],
+    kind: "AI services firm", note: "Backed by Anthropic, Blackstone, Hellman & Friedman and Goldman Sachs ($1.5B); acquired Fractional AI (2026)." },
+  { slug: "titan-msp", name: "Titan", aliases: ["Titan AI", "Titan MSP"], kind: "AI IT-services rollup",
+    note: "General Catalyst-led AI-enabled MSP rollup; first acquisition RFA (2025).",
+    queries: [`Titan "General Catalyst" MSP`, `Titan acquires MSP "AI"`] },
+  { slug: "propy", name: "Propy", aliases: ["Propy"], kind: "AI title and escrow rollup",
+    note: "$100M AI-led rollup of title and escrow companies; first acquisition Delta South Title (2025)." },
+  { slug: "cognida", name: "Cognida", aliases: ["Cognida"], kind: "AI-native accounting rollup", note: "Acquires accounting and operations firms." },
+  { slug: "accrual", name: "Accrual", aliases: ["Accrual"], kind: "AI accounting platform", note: "AI accounting platform acquiring firms and tools (Puzzle, 2026).",
+    queries: [`Accrual acquires accounting`, `"Accrual" AI accounting acquisition`] },
+  { slug: "radial-health", name: "Radial", aliases: ["Radial Health"], kind: "AI healthcare platform",
+    note: "General Catalyst-backed behavioral-health platform built through acquisitions.", queries: [`"General Catalyst" Radial acquires`, `Radial behavioral health acquisition`] },
+  { slug: "dragonfly-holdco", name: "Dragonfly", aliases: ["Dragonfly AI holding"], kind: "AI holding company",
+    note: "AI-native holding company (Misha Saul, Benjamin Plummer); first deal in strata management.", queries: [`Dragonfly "AI rollup"`, `Dragonfly strata acquisition AI`] },
+  { slug: "aistra", name: "Aistra", aliases: ["Aistra"], kind: "AI finance and accounting rollup",
+    note: "AI-augmented finance and accounting services; acquired a controlling stake in Veracity Services." },
+  { slug: "inkle", name: "Inkle", aliases: ["Inkle"], kind: "AI accounting rollup",
+    note: "AI-powered CPA services; acquired Finally's bookkeeping division.", queries: [`Inkle acquires bookkeeping`, `Inkle AI CPA acquisition`] },
   { slug: "crete-professionals-alliance", name: "Crete Professionals Alliance", aliases: ["Crete Professionals", "Crete PA"], kind: "AI accounting rollup",
     note: "Thrive Holdings-backed accounting firm rollup." },
   { slug: "shield-technology-partners", name: "Shield Technology Partners", aliases: ["Shield Technology Partners"], kind: "AI IT-services rollup",
-    note: "Thrive Holdings-backed IT services platform." },
+    note: "Thrive Holdings-backed IT services platform.", queries: [`"Shield Technology Partners"`, `Shield MSP acquisition Thrive`, `Shield IT services acquires`] },
 ];
 
 let lastFetch = 0;
@@ -73,15 +94,16 @@ async function migrate(): Promise<void> {
   await pool.query(`alter table deal_filings add column if not exists rollup_buyer text`);
   await pool.query(`create table if not exists rollup_buyers (
     slug text primary key, name text not null, aliases text[] not null, kind text not null, note text not null)`);
+  await pool.query(`alter table rollup_buyers add column if not exists queries text[]`);
   await pool.query(`create table if not exists rollup_scorecard (
     cik text primary key, accession_number text not null, announced date not null, buyer text, buyer_type text,
     rollup_buyer text, services_business boolean, probability double precision, multiple double precision,
     percentile double precision, inputs_before boolean, in_training boolean not null, recorded_at timestamptz not null default now())`);
   for (const b of ROLLUP_BUYERS) {
     await pool.query(
-      `insert into rollup_buyers values ($1,$2,$3,$4,$5) on conflict (slug) do update set
-         name = excluded.name, aliases = excluded.aliases, kind = excluded.kind, note = excluded.note`,
-      [b.slug, b.name, b.aliases, b.kind, b.note]);
+      `insert into rollup_buyers (slug, name, aliases, kind, note, queries) values ($1,$2,$3,$4,$5,$6) on conflict (slug) do update set
+         name = excluded.name, aliases = excluded.aliases, kind = excluded.kind, note = excluded.note, queries = excluded.queries`,
+      [b.slug, b.name, b.aliases, b.kind, b.note, b.queries ?? null]);
   }
 }
 

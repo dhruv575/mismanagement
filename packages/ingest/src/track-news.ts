@@ -93,11 +93,12 @@ async function main(): Promise<void> {
     name text primary key, mentions int not null default 1, example text, first_seen timestamptz not null default now())`);
 
   const days = process.argv.includes("--backfill") ? null : 3;
-  const buyers = (await pool.query<{ slug: string; name: string; aliases: string[] }>(`select slug, name, aliases from rollup_buyers`)).rows;
+  const buyers = (await pool.query<{ slug: string; name: string; aliases: string[]; queries: string[] | null }>(
+    `select slug, name, aliases, queries from rollup_buyers`)).rows;
   const items: Item[] = [];
   for (const b of buyers) {
-    const q = [...new Set([b.name, ...b.aliases])].map((a) => `"${a}"`).join(" OR ");
-    items.push(...(await feed(q, days, b.slug)));
+    const qs = b.queries?.length ? b.queries : [[...new Set([b.name, ...b.aliases])].map((a) => `"${a}"`).join(" OR ")];
+    for (const q of qs) items.push(...(await feed(q, days, b.slug)));
   }
   for (const q of DISCOVERY) items.push(...(await feed(q, days, null)));
   let fresh = 0;
@@ -107,24 +108,29 @@ async function main(): Promise<void> {
        on conflict (guid) do nothing`, [it.guid, it.title, it.source, it.url, it.published, it.query, it.buyer_slug]);
     fresh += r.rowCount ?? 0;
   }
-  console.log(`feeds: ${items.length} items from ${buyers.length + DISCOVERY.length} searches, ${fresh} new`);
+  console.log(`feeds: ${items.length} items, ${fresh} new`);
 
   // Extract in batches of 25 headlines.
-  const todo = (await pool.query<{ guid: string; title: string; source: string; url: string; published: string }>(
-    `select guid, title, source, url, published::text from rollup_news where not extracted order by published`)).rows;
-  const slugOf = (name: string) => buyers.find((b) => [b.name, ...b.aliases].some((a) => norm(name).includes(norm(a))))?.slug ?? null;
+  if (process.argv.includes("--reextract")) await pool.query(`update rollup_news set extracted = false`);
+  const todo = (await pool.query<{ guid: string; title: string; source: string; url: string; published: string; buyer_slug: string | null }>(
+    `select guid, title, source, url, published::text, buyer_slug from rollup_news where not extracted order by published`)).rows;
+  // A registry alias in the extracted buyer name, or -- for a headline from
+  // that buyer's own search -- the buyer's display name ("Titan").
+  const slugOf = (name: string, feedSlug: string | null) =>
+    buyers.find((b) => [b.name, ...b.aliases].some((a) => norm(name).includes(norm(a))))?.slug
+    ?? (feedSlug && norm(name).length >= 4 && norm(buyers.find((b) => b.slug === feedSlug)?.name ?? "").startsWith(norm(name)) ? feedSlug : null);
   let deals = 0;
   for (let i = 0; i < todo.length; i += 25) {
     const batch = todo.slice(i, i + 25);
     try {
       const { json } = await callLLM({
-        model: MODEL, systemPrompt: PROMPT, maxTokens: 3000,
+        model: MODEL, systemPrompt: PROMPT, maxTokens: 6000,
         userPrompt: batch.map((b, j) => `${j + 1}. ${b.title} (${b.source}, ${b.published.slice(0, 10)})`).join("\n"),
       });
       for (const d of Extract.parse(json).deals) {
         const src = batch[d.item - 1];
         if (!src || d.confidence < 0.5 || !["acquisition", "merger"].includes(d.deal_type)) continue;
-        const slug = slugOf(d.buyer);
+        const slug = slugOf(d.buyer, src.buyer_slug);
         if (!slug) {
           if (d.ai_rollup) await pool.query(
             `insert into rollup_buyer_candidates (name, example) values ($1, $2)
@@ -151,6 +157,9 @@ async function main(): Promise<void> {
     }
   }
   await dedupe();
+  // Candidates that have since joined the registry.
+  for (const b of buyers) await pool.query(`delete from rollup_buyer_candidates where lower(name) = lower($1) or lower(name) = any($2)`,
+    [b.name, b.aliases.map((a) => a.toLowerCase())]);
   const s = await pool.query(`select buyer, count(*)::int deals, max(announced)::text latest from rollup_deals group by 1 order by 2 desc`);
   console.log(`extracted ${deals} deal mentions from ${todo.length} headlines`);
   console.table(s.rows);
