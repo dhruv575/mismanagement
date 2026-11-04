@@ -1088,3 +1088,24 @@ h1 .tk-name {
 .rollup-feed li { display: grid; grid-template-columns: 7.5rem 1fr; gap: 1rem; padding: .6rem 0; border-bottom: 1px solid var(--line-subtle); }
 .rollup-feed .date { font-variant-numeric: tabular-nums; }
 @media (max-width: 640px) { .rollup-feed li { grid-template-columns: 1fr; gap: .15rem; } }
+
+/* Company page: verdict first, detail collapsed. */
+.co-head-simple h1 { margin-bottom: .25rem; }
+.verdict { display: grid; grid-template-columns: auto 1fr; gap: .25rem 1.25rem; align-items: center; margin-block: 1.5rem 2rem; padding: 1.25rem; border: 1px solid var(--line); border-radius: 8px; }
+.verdict h2 { margin: 0; font-size: 1.25rem; }
+.verdict p { margin: .25rem 0 0; }
+.verdict-num { font-size: 3rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.verdict[data-high="true"] .verdict-num { color: var(--hit-strong); }
+.verdict-summary, .biz-bars { grid-column: 1 / -1; }
+.verdict .verdict-summary { margin-top: 1rem; max-width: 70ch; line-height: 1.55; }
+.biz-bars { list-style: none; padding: 0; margin: 1rem 0 0; display: grid; gap: .5rem; max-width: 34rem; }
+.biz-bars li { display: grid; grid-template-columns: 10rem 1fr 3rem; gap: .75rem; align-items: center; }
+.biz-track { height: 8px; border-radius: 4px; background: var(--meter-track); overflow: hidden; }
+.biz-track > span { display: block; height: 100%; border-radius: 4px; background: var(--hit); }
+.biz-v { text-align: right; font-variant-numeric: tabular-nums; }
+.more-detail { margin-top: 2.5rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+.more-detail > summary { cursor: pointer; color: var(--text-secondary); font-weight: 500; margin-bottom: 1rem; }
+@media (max-width: 560px) {
+  .verdict { grid-template-columns: 1fr; }
+  .biz-bars li { grid-template-columns: 7.5rem 1fr 2.5rem; }
+}

@@ -3,7 +3,7 @@ import { cache } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { acquirerSlug, app } from "@takeover/api";
-import { fmtDate, fmtUsd, likelihoodPhrase } from "@/lib/format";
+import { fmtDate, fmtMultiple, fmtUsd, likelihoodPhrase } from "@/lib/format";
 import { TickerName } from "@/lib/ticker";
 import { SITE_URL } from "@/lib/site";
 import { SIGNAL_LABELS, SIGNAL_RULES, signalEvidence, signalMeasure, type SignalGroup } from "@/lib/signals";
@@ -117,12 +117,21 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
           ...(co.sic_description ? { industry: co.sic_description } : {}),
         },
       }) }} />
-      <header className="co-head">
-        <div className="co-id">
-          <h1><TickerName ticker={co.ticker} name={co.name} link={false} /></h1>
-          {co.sic_description && <p className="muted">{titleCase(co.sic_description)}</p>}
-        </div>
-        <dl className="stat-strip">
+      <header className="co-head co-head-simple">
+        <h1><TickerName ticker={co.ticker} name={co.name} link={false} /></h1>
+        <p className="muted">
+          {[co.sic_description && titleCase(co.sic_description), co.market_cap != null && `${fmtUsd(co.market_cap)} market cap`,
+            p.headcount && `${p.headcount.employees.toLocaleString("en-US")} employees`].filter(Boolean).join(" · ")}
+        </p>
+      </header>
+
+      {p.scores?.sponsor_prob != null ? <SponsorOdds s={p.scores} /> : <p className="muted">Not scored by the AI-rollup model yet.</p>}
+
+      {p.deals.length > 0 && <DealTable deals={p.deals} />}
+
+      <section aria-labelledby="key-h">
+        <h2 id="key-h">Key numbers</h2>
+        <dl className="stat-strip" data-cols="4">
           <TrendStat label="Revenue" value={fmtUsd(last(revenue))}
             delta={<Delta now={last(revenue)} prev={prev(revenue)} />}
             spark={<Sparkline values={revenue} labels={yl} format={fmtUsd} />} />
@@ -132,31 +141,20 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
           <TrendStat label="EBITDA" value={fmtUsd(last(ebitda))}
             delta={<Delta now={last(ebitda)} prev={prev(ebitda)} />}
             spark={<Sparkline values={ebitda} labels={yl} format={fmtUsd} />} />
-          <TrendStat label="Market cap" value={fmtUsd(co.market_cap)} />
-          <TrendStat label="Employees" value={p.headcount ? p.headcount.employees.toLocaleString("en-US") : "—"}
-            title={p.headcount?.matched_text}
-            sub={d.revenue_per_employee != null ? `${fmtUsd(d.revenue_per_employee)} revenue each` : undefined} />
           <TrendStat label="Net debt / EBITDA" value={d.net_debt_to_ebitda != null ? `${d.net_debt_to_ebitda.toFixed(1)}×` : "—"}
             sub={d.net_debt != null ? `${fmtUsd(d.net_debt)} net debt` : undefined} />
-          <TrendStat label="AI in 10-K" value={d.ai_mentions_per_10k_words != null ? d.ai_mentions_per_10k_words.toFixed(1) : "—"}
-            sub={d.ai_mentions_per_10k_words != null ? "mentions per 10K words" : undefined} />
         </dl>
-      </header>
-
-      {p.scores?.sponsor_prob != null && <SponsorOdds s={p.scores} />}
-
-      <section aria-labelledby="score-h" className="score-head">
-        <h2 id="score-h">
-          Signals{" "}
-          {p.scores && <span className="score-value">{p.scores.takeover_score ?? 0}<span className="muted"> of {p.groups.reduce((n, g) => n + g.signals.length, 0)}</span></span>}
-        </h2>
       </section>
+
+      <details className="more-detail">
+        <summary>Everything else: financials, signals, 13D filers, insiders, pay</summary>
 
       {(() => {
         const all = p.groups.flatMap((g) => g.signals);
         const fired = all.filter((k) => p.scores?.[k] === true), rest = all.filter((k) => p.scores?.[k] !== true);
         return (
-          <section aria-label="Signals">
+          <section aria-labelledby="score-h">
+            <h2 id="score-h">Signals <span className="muted">{fired.length} of {all.length}</span></h2>
             {fired.length > 0 ? <SignalGrid keys={fired} scores={p.scores} marketCap={co.market_cap} /> : <p className="muted">No signals fired.</p>}
             {rest.length > 0 && (
               <details className="other-signals">
@@ -191,32 +189,6 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
                       <td className="num"><Delta now={last(col(k))} prev={prev(col(k))} suffix=""
                         goodWhenUp={!["capex", "sbc"].includes(k)} /></td>
                       <td className="hide-narrow"><Sparkline values={col(k)} labels={yl} format={fmtUsd} width={80} height={22} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-
-        <section id="deals">
-          <h2>Deal filings</h2>
-          {p.deals.length === 0 ? (
-            <p className="muted">None.</p>
-          ) : (
-            <div className="table-wrap">
-              <table className="data stack-narrow">
-                <thead>
-                  <tr><th>Filed</th><th>Form</th><th>Acquirer</th><th className="num">Price</th><th className="num">Premium</th></tr>
-                </thead>
-                <tbody>
-                  {p.deals.map((x) => (
-                    <tr key={x.accession_number} data-terms={x.price_per_share != null || x.premium_pct != null}>
-                      <td className="date muted" data-slot="date">{fmtDate(x.filing_date)}</td>
-                      <td data-slot="form"><a href={x.document_url} rel="noopener">{x.form}</a></td>
-                      <td data-slot="by">{x.acquirer ? <Link href={`/acquirers/${acquirerSlug(x.acquirer)}`}>{x.acquirer}</Link> : (x.matched_buyer ? <span className="muted">Mentions {x.matched_buyer}</span> : "—")}</td>
-                      <td className="num" data-slot="price">{x.price_per_share != null ? `$${x.price_per_share.toFixed(2)}` : "—"}</td>
-                      <td className="num" data-slot="prem">{x.premium_pct != null ? `${x.premium_pct}%` : "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -287,6 +259,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
             </div>
           )}
         </section>
+      </details>
     </main>
   );
 }
@@ -361,24 +334,60 @@ const BUSINESS_ROWS: [string, string][] = [
   ["fragmented_market", "Fragmented market"],
 ];
 
-// The AI-rollup buyout model (sponsor-model.ts), relative to the average
-// company: how much more likely a private-equity firm, holdco or AI rollup
-// is to buy it, as a services business.
+// The verdict: how much likelier than average an AI rollup, holdco or PE firm
+// is to buy this company, and the 10-K business scores behind it.
 function SponsorOdds({ s }: { s: Record<string, unknown> }) {
   const mult = Number(s.sponsor_multiple);
+  const pct = s.sponsor_percentile != null ? Number(s.sponsor_percentile) : null;
   const scores = BUSINESS_ROWS.filter(([k]) => s[k] != null);
   return (
-    <section aria-labelledby="sponsor-h" className="sponsor">
-      <h2 id="sponsor-h" className="sponsor-h" data-high={mult >= 3}>{likelihoodPhrase(mult)} to be bought by an AI rollup</h2>
-      {s.business_summary != null && (
-        <p className="muted">
-          {String(s.business_summary)}{" "}
-          {scores.length > 0 && <span className="business-line">
-            {scores.map(([k, label], i) => <span key={k}>{i > 0 && " · "}{label} <strong>{Number(s[k])}</strong>/10</span>)}
-          </span>}{" "}
-          <Link href="/deals#model">How it works</Link>
-        </p>
+    <section aria-labelledby="sponsor-h" className="verdict" data-high={mult >= 3}>
+      <div className="verdict-num">{fmtMultiple(mult)}</div>
+      <div>
+        <h2 id="sponsor-h">{likelihoodPhrase(mult)} to be bought by an AI rollup</h2>
+        <p className="muted">{pct != null && <>More likely than {Math.round(pct <= 1 ? pct * 100 : pct)}% of Russell 3000 companies. </>}<Link href="/deals#model">How it works</Link></p>
+      </div>
+      {s.business_summary != null && <p className="verdict-summary">{String(s.business_summary)}</p>}
+      {scores.length > 0 && (
+        <ul className="biz-bars" aria-label="What the 10-K says about the business, out of 10">
+          {scores.map(([k, label]) => {
+            const v = Number(s[k]);
+            return (
+              <li key={k}>
+                <span>{label}</span>
+                <span className="biz-track" aria-hidden="true"><span style={{ width: `${v * 10}%` }} /></span>
+                <span className="biz-v">{v}<span className="muted">/10</span></span>
+              </li>
+            );
+          })}
+        </ul>
       )}
+    </section>
+  );
+}
+
+function DealTable({ deals }: { deals: Profile["deals"] }) {
+  return (
+    <section id="deals" aria-labelledby="deals-h">
+      <h2 id="deals-h">Deal filings</h2>
+      <div className="table-wrap">
+        <table className="data stack-narrow">
+          <thead>
+            <tr><th>Filed</th><th>Form</th><th>Acquirer</th><th className="num">Price</th><th className="num">Premium</th></tr>
+          </thead>
+          <tbody>
+            {deals.map((x) => (
+              <tr key={x.accession_number} data-terms={x.price_per_share != null || x.premium_pct != null}>
+                <td className="date muted" data-slot="date">{fmtDate(x.filing_date)}</td>
+                <td data-slot="form"><a href={x.document_url} rel="noopener">{x.form}</a></td>
+                <td data-slot="by">{x.acquirer ? <Link href={`/acquirers/${acquirerSlug(x.acquirer)}`}>{x.acquirer}</Link> : (x.matched_buyer ? <span className="muted">Mentions {x.matched_buyer}</span> : "—")}</td>
+                <td className="num" data-slot="price">{x.price_per_share != null ? `$${x.price_per_share.toFixed(2)}` : "—"}</td>
+                <td className="num" data-slot="prem">{x.premium_pct != null ? `${x.premium_pct}%` : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }
