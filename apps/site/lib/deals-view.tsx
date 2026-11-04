@@ -57,6 +57,7 @@ interface Backtest {
   untested: { key: string; why: string }[];
   scores: { score: number; n: number; deals: number }[];
   sponsor: { rows: number; positives: number; base_rate: number } | null;
+  pe?: { rows: number; positives: number; base_rate: number } | null;
 }
 
 // deal_class.buyer_type (classify-deals.ts) as shown on the page.
@@ -117,6 +118,18 @@ export async function DealsView({ searchParams, side }: { searchParams: Promise<
               <ScoreTable rows={live} />
             </details>
           )}
+        </section>
+      )}
+
+      {side === "devil" && bt.pe && (
+        <section className="backtest" id="model" aria-labelledby="pe-model-h">
+          <h2 id="pe-model-h">How the take-private model works</h2>
+          <p className="muted page-lede">
+            The model learns from {bt.pe.positives} buyouts by private-equity firms, sponsor-backed platforms, holdcos and insider groups
+            across {bt.pe.rows.toLocaleString("en-US")} company-years. It weighs size, goodwill from past acquisitions, activist 13D
+            stakes and what each 10-K says about the business. In backtests on 2020&ndash;2024, companies in its top tenth were about
+            3.8× as likely as average to be taken private.
+          </p>
         </section>
       )}
 

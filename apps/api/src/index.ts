@@ -329,12 +329,13 @@ app.get("/companies/:ticker/profile", async (c) => {
     pool().query(`select ts.*, ${SCORE_SQL} as takeover_score,
         coalesce(ss.signal_recurring_revenue, false) as signal_recurring_revenue, coalesce(ss.signal_rollup_shape, false) as signal_rollup_shape,
         ss.probability as sponsor_prob, ss.multiple as sponsor_multiple,
+        pe.multiple as pe_multiple, pe.percentile as pe_percentile,
       exists (select 1 from deal_filings d join deal_class dc using (accession_number)
                where d.cik = ts.cik and dc.issuer_acquired and not d.is_self_filed
                  and d.filing_date > now() - interval '12 months') as deal_pending, ss.percentile as sponsor_percentile,
         cb.services_share, cb.labor_intensity, cb.ai_automatable, cb.fragmented_market, cb.recurring_revenue, cb.rollup_fit,
         cb.summary as business_summary, cb.filing_date::text as business_filing_date, cb.accession_number as business_accession
-      from takeover_scores ts left join sponsor_scores ss using (cik) left join current_business cb using (cik) where ts.cik = $1`, [cik]),
+      from takeover_scores ts left join sponsor_scores ss using (cik) left join pe_scores pe using (cik) left join current_business cb using (cik) where ts.cik = $1`, [cik]),
     pool().query<{ fiscal_year: number; employees: number; matched_text: string; accession_number: string }>(
       `select fiscal_year, employees, matched_text, accession_number from headcount
         where cik = $1 order by fiscal_year desc limit 1`,
@@ -681,6 +682,7 @@ app.get("/backtest", async (c) => {
     signals: [...signals, ...sampled].sort((a, b) => (b.lift ?? 0) - (a.lift ?? 0)),
     untested: BACKTEST_UNTESTED.filter((u) => !sampled.some((v) => v.key === u.key)),
     sponsor: await sponsorMeta(),
+    pe: await sponsorMeta("pe"),
     scores: buckets.rows, cohorts: cohorts.rows,
   });
 });
@@ -729,9 +731,9 @@ const signalSql = (s: string) => (SPONSOR_SIGNALS.has(s) ? `coalesce(ss.${s}, fa
 const SCORE_SQL = `(ts.takeover_score + coalesce(ss.signal_recurring_revenue::int, 0) + coalesce(ss.signal_rollup_shape::int, 0))`;
 
 // The fitted sponsor model's headline numbers, for page copy.
-async function sponsorMeta(): Promise<{ base_rate: number; positives: number; rows: number } | null> {
+async function sponsorMeta(id = "sponsor"): Promise<{ base_rate: number; positives: number; rows: number } | null> {
   const r = await pool().query<{ metrics: { base_rate: number; positives: number; rows: number } }>(
-    `select metrics from takeover_model where id = 'sponsor'`).catch(() => ({ rows: [] as { metrics: { base_rate: number; positives: number; rows: number } }[] }));
+    `select metrics from takeover_model where id = $1`, [id]).catch(() => ({ rows: [] as { metrics: { base_rate: number; positives: number; rows: number } }[] }));
   return r.rows[0]?.metrics ?? null;
 }
 
@@ -739,9 +741,9 @@ async function sponsorMeta(): Promise<{ base_rate: number; positives: number; ro
 const BANDS: [string, number, number][] = [
   ["<0.5×", 0, 0.5], ["0.5–1×", 0.5, 1], ["1–2×", 1, 2], ["2–3×", 2, 3], ["3–5×", 3, 5], ["5–10×", 5, 10], ["10×+", 10, Infinity],
 ];
-async function likelihoodBands(minMcap: number): Promise<{ label: string; min: number; count: number }[]> {
+async function likelihoodBands(minMcap: number, table = "sponsor_scores"): Promise<{ label: string; min: number; count: number }[]> {
   const r = await pool().query<{ multiple: number }>(
-    `select ss.multiple from sponsor_scores ss join companies c using (cik)
+    `select ss.multiple from ${table} ss join companies c using (cik)
       where c.is_russell_3000 and (c.market_cap_at_universe_pull is null or c.market_cap_at_universe_pull >= $1::float8)`, [minMcap],
   ).catch(() => ({ rows: [] as { multiple: number }[] }));
   return BANDS.map(([label, lo, hi]) => ({ label, min: lo, count: r.rows.filter((x) => x.multiple >= lo && x.multiple < hi).length }));
@@ -752,7 +754,9 @@ app.get("/leaderboard", async (c) => {
   const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 100), 1), 3000);
   const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
   // Default order is the sponsor-buyout model; ?sort=score orders by signal count.
-  const sort = c.req.query("sort") === "score" ? "score" : "sponsor";
+  // ?sort=pe orders by the devil-side PE buyout model.
+  const q = c.req.query("sort");
+  const sort = q === "score" ? "score" : q === "pe" ? "pe" : "sponsor";
 
   // Reads the materialized takeover_scores table (refresh-scores.ts). The
   // select list is what the leaderboard row shows: identity, size, score
@@ -762,7 +766,7 @@ app.get("/leaderboard", async (c) => {
       c.cik, c.ticker, c.name, c.sic_description,
       c.market_cap_at_universe_pull as market_cap,
       ${SCORE_SQL} as takeover_score,
-      ss.probability as sponsor_prob, ss.multiple as sponsor_multiple,
+      ss.probability as sponsor_prob, ss.multiple as sponsor_multiple, pe.multiple as pe_multiple,
       exists (select 1 from deal_filings d join deal_class dc using (accession_number)
                where d.cik = ts.cik and dc.issuer_acquired and not d.is_self_filed
                  and d.filing_date > now() - interval '12 months') as deal_pending,
@@ -771,9 +775,10 @@ app.get("/leaderboard", async (c) => {
     from takeover_scores ts
     join companies c on c.cik = ts.cik
     left join sponsor_scores ss on ss.cik = ts.cik
+    left join pe_scores pe on pe.cik = ts.cik
     where c.is_russell_3000
       and (c.market_cap_at_universe_pull is null or c.market_cap_at_universe_pull >= $1::float8)
-    order by ${sort === "score" ? `${SCORE_SQL} desc, ss.probability desc nulls last` : `ss.probability desc nulls last, ${SCORE_SQL} desc`}, ts.tiebreak desc, c.ticker asc
+    order by ${sort === "score" ? `${SCORE_SQL} desc, ss.probability desc nulls last` : sort === "pe" ? `pe.probability desc nulls last, ${SCORE_SQL} desc` : `ss.probability desc nulls last, ${SCORE_SQL} desc`}, ts.tiebreak desc, c.ticker asc
     limit $2 offset $3
   `;
 
@@ -816,6 +821,7 @@ app.get("/leaderboard", async (c) => {
     sponsor_3x: dist.rows.reduce((a, d) => a + Number(d.sponsor_3x), 0),
     likelihood: await likelihoodBands(minMcap),
     sponsor: await sponsorMeta(),
+    ...(sort === "pe" ? { pe_likelihood: await likelihoodBands(minMcap, "pe_scores"), pe: await sponsorMeta("pe") } : {}),
     refreshed_at: dist.rows.reduce<string | null>((m, d) => (m && m > d.refreshed_at ? m : d.refreshed_at), null),
     rows: slim,
   });

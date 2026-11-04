@@ -2,35 +2,34 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { api } from "@/lib/api";
 import { TickerName } from "@/lib/ticker";
-import { fmtDate, fmtUsd } from "@/lib/format";
+import { fmtDate, fmtMultiple, fmtUsd, likelihoodPhrase } from "@/lib/format";
 
 // Scores refresh at most daily; serve a cached render.
 export const revalidate = 21600;
 
 export const metadata: Metadata = {
   title: "PE & activist takeover targets",
-  description: "Russell 3000 companies ranked by takeover signals a private-equity buyer or activist would look for: cheap, overpaid, diluted or under pressure. From SEC filings, updated daily.",
+  description: "Russell 3000 companies ranked by how likely a private-equity firm is to buy them, with the takeover signals an activist would look for. From SEC filings, updated daily.",
   alternates: { canonical: "/pe" },
 };
 
-interface Row { cik: string; ticker: string; name: string; market_cap?: number; takeover_score?: number; deal_pending?: boolean }
+interface Row { cik: string; ticker: string; name: string; market_cap?: number; takeover_score?: number; pe_multiple?: number; deal_pending?: boolean }
+interface Band { label: string; min: number; count: number }
 interface Board {
   refreshed_at: string | null;
   max_score: number;
   distribution: { score: number; count: number }[];
+  pe_likelihood: Band[];
   rows: Row[];
 }
 interface ThirteenD { accession_number: string; filing_date: string; filer_name: string; ticker: string | null; company_name: string }
 
-// Scores at or above this carry the accent color.
-const HIGH = 5;
-
 export default async function DevilHome() {
   const [data, feed] = await Promise.all([
-    api<Board>("/leaderboard?limit=50&sort=score"),
+    api<Board>("/leaderboard?limit=50&sort=pe"),
     api<{ filings: ThirteenD[] }>("/feeds/13d-recent?limit=5&active_only=1"),
   ]);
-  const high = data.distribution.filter((d) => d.score >= HIGH).reduce((a, d) => a + d.count, 0);
+  const high = data.pe_likelihood.filter((b) => b.min >= 3).reduce((a, b) => a + b.count, 0);
 
   return (
     <main className="page">
@@ -39,11 +38,11 @@ export default async function DevilHome() {
         <div className="hero">
           <div className="hero-value">{high.toLocaleString("en-US")}</div>
           <div className="hero-label">
-            Russell 3000 companies show {HIGH} or more of the {data.max_score} signs a private-equity buyer or activist looks for
+            Russell 3000 companies are 3× or more likely than average to be bought by a private-equity firm
           </div>
           {data.refreshed_at && <div className="muted fresh">Updated {fmtDate(data.refreshed_at)}</div>}
         </div>
-        <ScoreBars dist={data.distribution} />
+        <Bands bands={data.pe_likelihood} />
       </section>
 
       {feed.filings.length > 0 && (
@@ -65,7 +64,7 @@ export default async function DevilHome() {
       )}
 
       <section className="home-section" aria-labelledby="board-h">
-        <h2 id="board-h">Most takeover signals</h2>
+        <h2 id="board-h">Most likely to be taken private</h2>
         <div className="table-wrap">
           <table className="data rows-hover">
             <thead>
@@ -73,7 +72,8 @@ export default async function DevilHome() {
                 <th className="num">#</th>
                 <th>Company</th>
                 <th className="num hide-narrow">Market cap</th>
-                <th className="num" title={`Takeover signals fired, out of ${data.max_score}`}>Signals</th>
+                <th className="num hide-narrow" title={`Takeover signals fired, out of ${data.max_score}`}>Signals</th>
+                <th className="num" title="How much more likely than the average company to be bought by a private-equity firm">Likelihood</th>
               </tr>
             </thead>
             <tbody>
@@ -85,9 +85,9 @@ export default async function DevilHome() {
                     {r.deal_pending && <> <span className="tag" title="Agreed to be acquired in the last 12 months">Deal pending</span></>}
                   </td>
                   <td className="num hide-narrow muted">{fmtUsd(r.market_cap)}</td>
-                  <td className="num odds" data-high={(r.takeover_score ?? 0) >= HIGH}>
-                    {r.takeover_score ?? 0}<span className="muted"> / {data.max_score}</span>
-                  </td>
+                  <td className="num hide-narrow muted">{r.takeover_score ?? 0} / {data.max_score}</td>
+                  <td className="num odds" data-high={(r.pe_multiple ?? 0) >= 3}
+                    title={r.pe_multiple != null ? likelihoodPhrase(r.pe_multiple) : undefined}>{fmtMultiple(r.pe_multiple)}</td>
                 </tr>
               ))}
             </tbody>
@@ -98,24 +98,27 @@ export default async function DevilHome() {
   );
 }
 
-// Companies by number of signals fired; HIGH and up carry the accent color.
-function ScoreBars({ dist }: { dist: { score: number; count: number }[] }) {
-  const top = Math.max(...dist.map((d) => d.count), 1);
+// Companies by PE-buyout likelihood band; only above-average bands are
+// drawn so the tail stays visible, 3x and up carry the accent color.
+function Bands({ bands: all }: { bands: Band[] }) {
+  const below = all.filter((b) => b.min < 1).reduce((a, b) => a + b.count, 0);
+  const bands = all.filter((b) => b.min >= 1);
+  const top = Math.max(...bands.map((b) => b.count), 1);
   return (
     <figure className="dist">
       <div className="dist-bars" aria-hidden="true">
-        {dist.map((d) => (
-          <div key={d.score} className="dist-col" title={`${d.score} signals: ${d.count.toLocaleString("en-US")} companies`}>
-            <span className="dist-count">{d.count > 0 ? d.count.toLocaleString("en-US") : ""}</span>
-            <div className="dist-bar" data-heavy={d.score >= HIGH} style={{ height: `${Math.max((d.count / top) * 100, d.count ? 2 : 0)}%` }} />
-            <span className="dist-k">{d.score}</span>
+        {bands.map((b) => (
+          <div key={b.label} className="dist-col" title={`${b.label} as likely as average: ${b.count.toLocaleString("en-US")} companies`}>
+            <span className="dist-count">{b.count > 0 ? b.count.toLocaleString("en-US") : ""}</span>
+            <div className="dist-bar" data-heavy={b.min >= 3} style={{ height: `${Math.max((b.count / top) * 100, b.count ? 2 : 0)}%` }} />
+            <span className="dist-k">{b.label}</span>
           </div>
         ))}
       </div>
-      <figcaption className="muted">Companies by number of takeover signals fired.</figcaption>
+      <figcaption className="muted">Above-average companies by how much more likely they are to be taken private. {below.toLocaleString("en-US")} more are below average.</figcaption>
       <table className="sr-only">
-        <thead><tr><th>Signals</th><th>Companies</th></tr></thead>
-        <tbody>{dist.map((d) => <tr key={d.score}><td>{d.score}</td><td>{d.count}</td></tr>)}</tbody>
+        <thead><tr><th>Likelihood vs. average</th><th>Companies</th></tr></thead>
+        <tbody>{bands.map((b) => <tr key={b.label}><td>{b.label}</td><td>{b.count}</td></tr>)}<tr><td>Below 1×</td><td>{below}</td></tr></tbody>
       </table>
     </figure>
   );

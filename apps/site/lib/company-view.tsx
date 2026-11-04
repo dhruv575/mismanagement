@@ -67,7 +67,7 @@ export async function companyMetadata(ticker: string, side: Side): Promise<Metad
   const title = side === "angel" ? `${co.name} (${co.ticker}) AI-rollup odds` : `${co.name} (${co.ticker}) takeover score`;
   const lead = side === "angel"
     ? `${co.name} (${co.ticker}): ${mult != null ? `${likelihoodPhrase(mult)} to be bought by an AI rollup.` : "AI-rollup odds from SEC filings."}`
-    : `${co.name} (${co.ticker}) takeover attractiveness from SEC filings. ${scoreText}`;
+    : `${co.name} (${co.ticker}): ${p.scores?.pe_multiple != null ? `${likelihoodPhrase(Number(p.scores.pe_multiple))} to be taken private. ` : ""}${scoreText}`;
   const description = `${lead}${facts ? ` ${facts[0]!.toUpperCase()}${facts.slice(1)}.` : ""}`;
   const path = `${baseOf(side)}/company/${co.ticker}`;
   return {
@@ -249,15 +249,21 @@ function Signals({ p }: { p: Profile }) {
   const all = p.groups.flatMap((g) => g.signals);
   const fired = all.filter((k) => p.scores?.[k] === true), rest = all.filter((k) => p.scores?.[k] !== true);
   const co = p.company;
+  const mult = p.scores?.pe_multiple != null ? Number(p.scores.pe_multiple) : null;
+  const pct = p.scores?.pe_percentile != null ? Number(p.scores.pe_percentile) : null;
   return (
     <section aria-labelledby="score-h">
-      <div className="verdict" data-high={fired.length >= 5}>
-        <div className="verdict-num">{p.scores ? fired.length : "—"}<span className="muted verdict-of">/{all.length}</span></div>
-        <div>
-          <h2 id="score-h">{p.scores ? `${fired.length} of ${all.length} takeover signals` : "Not scored yet"}</h2>
-          <p className="muted">Signs a PE buyer or activist would see an opportunity: cheap, overpaid, diluted or under pressure. <Link href="/pe/deals#backtest">How well they predict deals</Link></p>
+      {mult != null && (
+        <div className="verdict" data-high={mult >= 3}>
+          <div className="verdict-num">{fmtMultiple(mult)}</div>
+          <div>
+            <h2 id="pe-h">{likelihoodPhrase(mult)} to be taken private</h2>
+            <p className="muted">{pct != null && <>Top {topShare(pct)} of the Russell 3000 for a buyout by a private-equity firm, holdco or insiders. </>}<Link href="/pe/deals#model">How it works</Link></p>
+          </div>
         </div>
-      </div>
+      )}
+      <h2 id="score-h">Takeover signals <span className="muted">{p.scores ? `${fired.length} of ${all.length}` : "not scored yet"}</span></h2>
+      <p className="muted">Signs an activist or buyer would see an opportunity: cheap, overpaid, diluted or under pressure. <Link href="/pe/deals#backtest">How well they predict deals</Link></p>
       {fired.length > 0 ? <SignalGrid keys={fired} scores={p.scores} marketCap={co.market_cap} /> : <p className="muted">No signals fired.</p>}
       {rest.length > 0 && (
         <details className="other-signals">

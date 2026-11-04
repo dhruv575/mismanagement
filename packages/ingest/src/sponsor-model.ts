@@ -7,6 +7,11 @@
 // that edge is definitional (the business scores pick out services
 // companies); the lean feature set did as well as everything else.
 //
+// The same features also fit a second model, 'pe', for the devil side of
+// the site: any sponsor buyout (PE firm, platform, holdco, insiders), any
+// business. experiment.ts: AUC ~0.77, top decile ~3.8x on 110 test
+// positives. Written to pe_scores.
+//
 // Steps (run in order; each is rerunnable):
 //   tsx src/sponsor-model.ts --fit        fit on backtest_panel, store in takeover_model ('sponsor')
 //   tsx src/sponsor-model.ts --score-10k  LLM-score each current company's latest 10-K Business section
@@ -64,11 +69,18 @@ function solve(A: number[][], b: number[]): number[] {
   return M.map((row, i) => row[n]! / row[i]!);
 }
 
-async function fitModel(): Promise<void> {
+// Labels by model id. 'sponsor' powers the angel side, 'pe' the devil side.
+const LABELS: Record<string, { sql: string; l2: number; what: string }> = {
+  sponsor: { sql: "(p.target and c.issuer_acquired and c.services_business and c.buyer_type = any($1))", l2: L2, what: "sponsor buyouts of services businesses" },
+  pe: { sql: "(p.target and c.issuer_acquired and c.buyer_type = any($1))", l2: 2, what: "sponsor buyouts of any business" },
+};
+
+async function fitModel(id: string): Promise<void> {
+  const label = LABELS[id]!;
   const rows = (await pool.query(`
     select p.public_float, p.goodwill_to_assets, p.thirteen_d_count,
            ${BUSINESS_SCORES.map((s) => `b.${s}`).join(", ")},
-           (p.target and c.issuer_acquired and c.services_business and c.buyer_type = any($1)) as y
+           ${label.sql} as y
       from backtest_panel p
       left join business_score b using (cik)
       left join deal_class c on c.accession_number = p.event_accession`, [SPONSOR_TYPES])).rows
@@ -85,7 +97,7 @@ async function fitModel(): Promise<void> {
       const p = sigmoid(x.reduce((a, v, j) => a + v * beta[j], 0)), s = p * (1 - p);
       for (let a = 0; a <= k; a++) { g[a] += (y[i]! - p) * x[a]!; for (let b = 0; b <= a; b++) H[a]![b] += s * x[a]! * x[b]!; }
     });
-    for (let a = 0; a <= k; a++) { for (let b = 0; b < a; b++) H[b]![a] = H[a]![b]; if (a) { g[a] -= L2 * beta[a]; H[a]![a] += L2; } }
+    for (let a = 0; a <= k; a++) { for (let b = 0; b < a; b++) H[b]![a] = H[a]![b]; if (a) { g[a] -= label.l2 * beta[a]; H[a]![a] += label.l2; } }
     const step = solve(H, g);
     beta = beta.map((v, j) => v + step[j]!);
     if (Math.max(...step.map(Math.abs)) < 1e-8) break;
@@ -94,13 +106,13 @@ async function fitModel(): Promise<void> {
   const stored: Stored = { features: FEATURES, impute, mean, sd, beta, base_rate };
   const cols = FEATURES.flatMap((f) => (f.missingFlag ? [f.name, `${f.name}_missing`] : [f.name]));
   await pool.query(
-    `insert into takeover_model (id, fitted_at, features, metrics, coefficients, impute) values ('sponsor', now(), $1, $2, $3, $4)
+    `insert into takeover_model (id, fitted_at, features, metrics, coefficients, impute) values ($5, now(), $1, $2, $3, $4)
      on conflict (id) do update set fitted_at = now(), features = excluded.features, metrics = excluded.metrics,
        coefficients = excluded.coefficients, impute = excluded.impute`,
     [JSON.stringify(stored), JSON.stringify({ rows: rows.length, positives: y.reduce((a, b) => a + b, 0), base_rate }),
-      JSON.stringify(["intercept", ...cols].map((name, j) => ({ name, coef: beta[j], odds_per_sd: Math.exp(beta[j]) }))), JSON.stringify(impute)],
+      JSON.stringify(["intercept", ...cols].map((name, j) => ({ name, coef: beta[j], odds_per_sd: Math.exp(beta[j]) }))), JSON.stringify(impute), id],
   );
-  console.log(`fit: ${rows.length} company-years, ${y.reduce((a, b) => a + b, 0)} sponsor buyouts of services businesses (base ${(100 * base_rate).toFixed(2)}%)`);
+  console.log(`fit ${id}: ${rows.length} company-years, ${y.reduce((a, b) => a + b, 0)} ${label.what} (base ${(100 * base_rate).toFixed(2)}%)`);
   console.table(["intercept", ...cols].map((name, j) => ({ name, odds_per_sd: Math.exp(beta[j]).toFixed(2) })));
 }
 
@@ -183,6 +195,7 @@ async function latestFloats(): Promise<Map<string, number>> {
 async function apply(): Promise<void> {
   const m = (await pool.query(`select features from takeover_model where id = 'sponsor'`)).rows[0]?.features as Stored | undefined;
   if (!m) throw new Error("no sponsor model; run --fit first");
+  const pe = (await pool.query(`select features from takeover_model where id = 'pe'`)).rows[0]?.features as Stored | undefined;
   const floats = await latestFloats();
   const rows = (await pool.query(`
     select t.cik, t.total_assets, t.goodwill, t.active_13d_count, c.market_cap_at_universe_pull as mcap,
@@ -199,8 +212,8 @@ async function apply(): Promise<void> {
       goodwill_to_assets: r.total_assets > 0 ? (r.goodwill ?? 0) / r.total_assets : null,
       has_13d: r.active_13d_count > 0 ? 1 : 0,
     };
-    return { r, p: x.log_float == null ? null : predict(m, x) };
-  }).filter((s): s is { r: any; p: number } => s.p != null);
+    return { r, p: x.log_float == null ? null : predict(m, x), q: x.log_float == null || !pe ? null : predict(pe, x) };
+  }).filter((s): s is { r: any; p: number; q: number | null } => s.p != null);
   const sorted = scored.map((s) => s.p).sort((a, b) => a - b);
   const pct = (p: number) => { let lo = 0, hi = sorted.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (sorted[mid]! < p) lo = mid + 1; else hi = mid; } return lo / sorted.length; };
   await pool.query(`delete from sponsor_scores`);
@@ -214,6 +227,20 @@ async function apply(): Promise<void> {
         ...BUSINESS_SCORES.map((k) => c.map((s) => s.r[k] ?? null))],
     );
   }
+  if (pe) {
+    const qs = scored.filter((s) => s.q != null).map((s) => s.q!).sort((a, b) => a - b);
+    const qpct = (q: number) => { let lo = 0, hi = qs.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (qs[mid]! < q) lo = mid + 1; else hi = mid; } return lo / qs.length; };
+    await pool.query(`create table if not exists pe_scores (cik text primary key, probability double precision not null,
+      multiple double precision not null, percentile double precision not null, scored_at timestamptz not null default now())`);
+    await pool.query(`delete from pe_scores`);
+    const rowsQ = scored.filter((s) => s.q != null);
+    for (let i = 0; i < rowsQ.length; i += 500) {
+      const c = rowsQ.slice(i, i + 500);
+      await pool.query(`insert into pe_scores (cik, probability, multiple, percentile) select * from unnest($1::text[], $2::float8[], $3::float8[], $4::float8[])`,
+        [c.map((s) => s.r.cik), c.map((s) => s.q), c.map((s) => s.q! / pe.base_rate), c.map((s) => qpct(s.q!))]);
+    }
+    console.log(`apply pe: ${rowsQ.length} scored, ${rowsQ.filter((s) => s.q! / pe.base_rate >= 3).length} at 3x+`);
+  }
   const s = await pool.query(`select count(*)::int n, count(*) filter (where signal_recurring_revenue)::int rec,
       count(*) filter (where signal_rollup_shape)::int shape, round(avg(probability)::numeric * 100, 2) avg_pct,
       count(*) filter (where multiple >= 3)::int over3x from sponsor_scores`);
@@ -222,7 +249,7 @@ async function apply(): Promise<void> {
 
 async function main(): Promise<void> {
   const all = !["--fit", "--score-10k", "--apply"].some((a) => process.argv.includes(a));
-  if (all || process.argv.includes("--fit")) await fitModel();
+  if (all || process.argv.includes("--fit")) { await fitModel("sponsor"); await fitModel("pe"); }
   if (all || process.argv.includes("--score-10k")) await score10k();
   if (all || process.argv.includes("--apply")) await apply();
   await pool.end();

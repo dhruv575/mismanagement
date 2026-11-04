@@ -121,3 +121,12 @@ A full first pull of the Russell 3000 takes a few hours, mostly to stay within E
 ## License
 
 [MIT](LICENSE)
+
+## Two sides
+
+The site has two sides over the same data, switched by the toggle in the header:
+
+- **Angel** (`/`, `/rollups`, `/deals`, `/company/X`): AI rollups. Ranked by the `sponsor` model (sponsor buyouts of services businesses).
+- **Devil** (`/pe`, `/pe/deals`, `/pe/company/X`, `/acquirers`): PE and activist takeovers. Ranked by the `pe` model (sponsor buyouts of any business, `pe_scores`), with the 15 takeover signals, 13D filers, insiders and pay.
+
+`sponsor-model --fit` fits both models; `--apply` (daily) writes `sponsor_scores` and `pe_scores`.
