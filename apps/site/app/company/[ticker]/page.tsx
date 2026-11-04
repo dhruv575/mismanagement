@@ -146,8 +146,6 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
         </dl>
       </section>
 
-      <details className="more-detail">
-        <summary>Everything else: financials, signals, 13D filers, insiders, pay</summary>
 
       {(() => {
         const all = p.groups.flatMap((g) => g.signals);
@@ -259,7 +257,6 @@ export default async function CompanyPage({ params }: { params: Promise<{ ticker
             </div>
           )}
         </section>
-      </details>
     </main>
   );
 }

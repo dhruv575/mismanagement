@@ -1091,7 +1091,7 @@ h1 .tk-name {
 
 /* Company page: verdict first, detail collapsed. */
 .co-head-simple h1 { margin-bottom: .25rem; }
-.verdict { display: grid; grid-template-columns: auto 1fr; gap: .25rem 1.25rem; align-items: center; margin-block: 1.5rem 2rem; padding: 1.25rem; border: 1px solid var(--line); border-radius: 8px; }
+.verdict { display: grid; grid-template-columns: auto 1fr; gap: .25rem 1.25rem; align-items: center; margin-block: 1.5rem 2.5rem; }
 .verdict h2 { margin: 0; font-size: 1.25rem; }
 .verdict p { margin: .25rem 0 0; }
 .verdict-num { font-size: 3rem; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
