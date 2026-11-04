@@ -79,7 +79,7 @@ export default async function AcquirerPage({ params }: { params: Promise<{ slug:
             <tbody>
               {p.targets.map((t) => (
                 <tr key={t.ticker}>
-                  <td><TickerName ticker={t.ticker} name={t.name} /></td>
+                  <td><TickerName ticker={t.ticker} name={t.name} base="/pe" /></td>
                   <td className="num">{t.pre_score != null ? <>{t.pre_score}<span className="muted"> / 7</span></> : <span className="muted">—</span>}</td>
                   <td className="num">{t.ticker.startsWith("CIK") || t.takeover_score == null ? <span className="muted">—</span> : <>{t.takeover_score}<span className="muted"> / 13</span></>}</td>
                   <td className="num">{t.filings}</td>
@@ -107,7 +107,7 @@ export default async function AcquirerPage({ params }: { params: Promise<{ slug:
               {p.deals.map((d) => (
                 <tr key={d.accession_number} data-terms={d.price_per_share != null || d.premium_pct != null}>
                   <td className="date muted" data-slot="date">{fmtDate(d.filing_date)}</td>
-                  <td data-slot="main"><TickerName ticker={d.ticker} name={d.name} /></td>
+                  <td data-slot="main"><TickerName ticker={d.ticker} name={d.name} base="/pe" /></td>
                   <td data-slot="form"><a href={d.document_url} rel="noopener">{d.form}</a>{d.mention && <span className="muted"> · mention</span>}</td>
                   <td className="num" data-slot="price">{d.price_per_share != null ? `$${d.price_per_share.toFixed(2)}` : "—"}</td>
                   <td className="num" data-slot="prem">{d.premium_pct != null ? `${d.premium_pct}%` : "—"}</td>

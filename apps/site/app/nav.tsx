@@ -4,24 +4,46 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { PixelMark } from "@/lib/mark";
+import { baseOf, counterpart, sideOf } from "@/lib/side";
 
 interface Hit { ticker: string; name: string; sic_description: string | null }
 
-export function Nav() {
+// The whole header: side toggle, brand, links. Client-side so it knows the
+// current side from the path; it stays mounted across navigations.
+export function Header() {
   const path = usePathname();
+  const side = sideOf(path);
+  const base = baseOf(side);
+  const cur = (href: string) => (path === href || (href !== base && href.length > 1 && path.startsWith(href)) ? "page" : undefined);
+  const links: [string, string][] = side === "angel"
+    ? [["/rollups", "Rollups"], ["/deals", "Model"]]
+    : [["/pe/deals", "Deals"], ["/acquirers", "Acquirers"]];
   return (
-    <nav className="nav" aria-label="Primary">
-      <Search />
-      <Link href="/rollups" aria-current={path === "/rollups" ? "page" : undefined}>Rollups</Link>
-      <Link href="/deals" aria-current={path === "/deals" ? "page" : undefined}>Deals</Link>
-      <Link href="/acquirers" aria-current={path.startsWith("/acquirers") ? "page" : undefined}>Acquirers</Link>
-    </nav>
+    <header className="header" data-side={side}>
+      <div className="header-inner">
+        <div className="header-left">
+          <Link href={counterpart(path)} className="side-toggle" data-side={side} role="switch" aria-checked={side === "devil"}
+            aria-label={side === "angel" ? "Switch to PE & activist takeovers" : "Switch to AI rollups"}
+            title={side === "angel" ? "Switch to PE & activist takeovers" : "Switch to AI rollups"}>
+            <span className="side-opt" data-on={side === "angel"}>Angel</span>
+            <span className="side-opt" data-on={side === "devil"}>Devil</span>
+          </Link>
+          <Link href={base || "/"} className="brand"><PixelMark size={32} />Takeover
+            <span className="brand-sub">{side === "angel" ? "AI rollups" : "PE & activists"}</span></Link>
+        </div>
+        <nav className="nav" aria-label="Primary">
+          <Search base={base} />
+          {links.map(([href, label]) => <Link key={href} href={href} aria-current={cur(href)}>{label}</Link>)}
+        </nav>
+      </div>
+    </header>
   );
 }
 
 // Collapsed to an icon; expands into an input on click or "/". Results are
 // companies matched by ticker, name or industry.
-function Search() {
+function Search({ base }: { base: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -63,7 +85,7 @@ function Search() {
     return () => { clearTimeout(t); ctrl.abort(); };
   }, [q]);
 
-  const go = (h: Hit) => { close(); router.push(`/company/${h.ticker}`); };
+  const go = (h: Hit) => { close(); router.push(`${base}/company/${h.ticker}`); };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") close();

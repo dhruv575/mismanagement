@@ -1,7 +1,6 @@
-import { PixelMark } from "@/lib/mark";
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
-import { Nav } from "./nav";
+import { Header } from "./nav";
 import { REPO_URL, SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
 import "./globals.css";
 
@@ -49,12 +48,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }} />
         {/* Static chrome: never behind a data or auth boundary. */}
-        <header className="header">
-          <div className="header-inner">
-            <a href="/" className="brand"><PixelMark size={32} />Takeover</a>
-            <Nav />
-          </div>
-        </header>
+        <Header />
         {children}
       </body>
     </html>

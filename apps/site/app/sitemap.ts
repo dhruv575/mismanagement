@@ -13,6 +13,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${SITE_URL}/deals`, lastModified, changeFrequency: "daily", priority: 0.8 },
     { url: `${SITE_URL}/rollups`, lastModified, changeFrequency: "daily", priority: 0.9 },
     { url: `${SITE_URL}/acquirers`, lastModified, changeFrequency: "daily", priority: 0.8 },
+    { url: `${SITE_URL}/pe`, lastModified, changeFrequency: "daily", priority: 0.9 },
+    { url: `${SITE_URL}/pe/deals`, lastModified, changeFrequency: "daily", priority: 0.8 },
     ...acq.rows.map((r) => ({
       url: `${SITE_URL}/acquirers/${r.slug}`,
       lastModified,

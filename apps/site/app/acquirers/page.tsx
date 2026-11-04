@@ -55,7 +55,7 @@ export default async function Acquirers() {
                   {a.targets.slice(0, 3).map((t, i) => (
                     <span key={t.ticker}>
                       {i > 0 && ", "}
-                      <Link className="ticker" href={`/company/${t.ticker}`} title={t.name}>{t.ticker}</Link>
+                      <Link className="ticker" href={`/pe/company/${t.ticker}`} title={t.name}>{t.ticker}</Link>
                     </span>
                   ))}
                   {a.targets.length > 3 && <span className="muted"> +{a.targets.length - 3}</span>}
