@@ -1110,27 +1110,54 @@ h1 .tk-name {
   .biz-bars li { grid-template-columns: 7.5rem 1fr 2.5rem; }
 }
 
-/* Angel / devil toggle. Devil side swaps the accent to red. */
-.header-left { display: flex; align-items: center; gap: .875rem; min-width: 0; }
+/* Angel / devil toggle (top right). The devil side is the dark theme. */
 .side-toggle {
-  display: inline-flex; padding: 3px; border-radius: 999px; background: var(--surface-3);
-  font-size: .75rem; font-weight: 600; text-decoration: none; flex-shrink: 0;
+  position: relative; display: inline-flex; align-items: center; padding: 3px; border-radius: 999px;
+  background: var(--surface-3); border: 1px solid var(--line); text-decoration: none; flex-shrink: 0;
 }
-.side-opt { padding: .25rem .625rem; border-radius: 999px; color: var(--text-muted); transition: background .15s, color .15s; }
-.side-opt[data-on="true"] { background: var(--surface-0); color: var(--text-primary); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
-.side-toggle:hover .side-opt[data-on="false"] { color: var(--text-primary); }
+.side-knob {
+  position: absolute; top: 3px; left: 3px; width: 40px; height: 32px; border-radius: 999px;
+  background: var(--surface-0); box-shadow: 0 1px 3px rgba(0,0,0,.18);
+  transition: transform .45s var(--ease-out), background .45s;
+}
+.side-toggle[data-side="devil"] .side-knob { transform: translateX(40px); }
+.side-opt { position: relative; display: grid; place-items: center; width: 40px; height: 32px; transition: opacity .3s, transform .3s var(--ease-out); }
+.side-opt[data-on="false"] { opacity: .45; filter: grayscale(1); }
+.side-toggle:hover .side-opt[data-on="false"] { opacity: .9; filter: none; transform: translateY(-1px); }
 .side-toggle:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
+.side-opt svg { image-rendering: pixelated; }
 .brand-sub { font-weight: 400; color: var(--text-muted); font-size: .8125rem; margin-left: .5rem; }
 .verdict-of { font-size: 1.5rem; font-weight: 500; }
 @media (max-width: 560px) { .brand-sub { display: none; } }
 
+/* The page swap is a circle growing from the toggle (Header in nav.tsx). */
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+::view-transition-new(root) { z-index: 2; }
+
 :root:has(.header[data-side="devil"]) {
-  --accent: #b91c1c;
-  --accent-bright: #dc2626;
-  --accent-ring: rgba(220, 38, 38, 0.35);
-  --hit: #dc2626;
-  --hit-strong: #991b1b;
-  --hit-soft: rgba(220, 38, 38, 0.07);
-  --hit-line: rgba(220, 38, 38, 0.35);
-  --meter-track-hit: rgba(220, 38, 38, 0.15);
+  color-scheme: dark;
+  --surface-0: #0c0a0b;
+  --surface-1: #141112;
+  --surface-2: #1a1617;
+  --surface-3: #241e20;
+  --surface-hover: #2c2527;
+  --line-subtle: rgba(255, 255, 255, 0.06);
+  --line: rgba(255, 255, 255, 0.11);
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --text-primary: #f4f4f5;
+  --text-secondary: #c4c4c8;
+  --text-muted: #8f8f96;
+  --accent: #f87171;
+  --accent-bright: #ef4444;
+  --accent-ring: rgba(248, 113, 113, 0.4);
+  --hit: #ef4444;
+  --hit-strong: #f87171;
+  --hit-soft: rgba(239, 68, 68, 0.1);
+  --hit-line: rgba(239, 68, 68, 0.4);
+  --meter-track: rgba(255, 255, 255, 0.09);
+  --meter-track-hit: rgba(239, 68, 68, 0.22);
+  --neg: #f87171;
+  --neg-soft: rgba(248, 113, 113, 0.12);
+  --pos: #34d399;
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.6);
 }

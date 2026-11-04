@@ -1,25 +1,25 @@
-// The pixel mark: a big fish about to swallow a small one, on a 16x16
-// grid. Same grid as app/icon.svg (generated from it). Render at multiples
-// of 16px so every pixel stays square.
+// The pixel mark: one face, angel on the left (halo, white) and devil on
+// the right (horn, red), on a 16x16 grid. Same grid as app/icon.svg
+// (generated from it). Render at multiples of 16px so pixels stay square.
 const GRID = [
-  ".IIIIIIIIIIIIII.",
-  "IIIIIIIIIIIIIIII",
-  "IIIIIIWWWWIIIIII",
-  "IIIIWWWWWWWIIIWI",
-  "IIIWWNWWWWWWIWWI",
-  "IIWWWWWWWWWWWWWI",
-  "IIIYIIWWWWWWWWII",
-  "IYYIIIIWWWWWWIII",
-  "IYYIIIIWWWWWWIII",
-  "IIIYIIWWWWWWWWII",
-  "IIWWWWWWWWWWWWWI",
-  "IIIWWWWWWWWWIWWI",
-  "IIIIWWWWWWWIIIWI",
-  "IIIIIIWWWWIIIIII",
-  "IIIIIIIIIIIIIIII",
-  ".IIIIIIIIIIIIII.",
+  ".HHHHH.......D..",
+  "H.....H.....DRD.",
+  ".HHHHH.....DRRD.",
+  "...OOOOOOOOORD..",
+  "..OWWWWWRRRRRO..",
+  ".OWWWWWWRRRRRRO.",
+  ".OWWKKWWRRYYRRO.",
+  ".OWWKKWWRRYYRRO.",
+  ".OWWWWWWRRRRRRO.",
+  ".OWWWWWWRRRRRRO.",
+  ".OWKWWWWRRRRDRO.",
+  ".OWWKKKKDDDDRRO.",
+  "..OWWWWWRRRRRO..",
+  "...OOOOOOOOOOR..",
+  ".............R..",
+  "............RRR.",
 ];
-const COLORS: Record<string, string> = { I: "#4338ca", N: "#1e1b4b", W: "#ffffff", Y: "#fbbf24" };
+const COLORS: Record<string, string> = { H: "#fbbf24", O: "#1e1b4b", W: "#ffffff", K: "#1e1b4b", R: "#dc2626", D: "#7f1d1d", Y: "#fde047" };
 
 // One rect per horizontal run of a color.
 const RUNS = GRID.flatMap((row, y) => {

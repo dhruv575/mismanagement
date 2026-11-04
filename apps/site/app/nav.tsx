@@ -5,36 +5,66 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { PixelMark } from "@/lib/mark";
+import { Sprite } from "@/lib/sprites";
 import { baseOf, counterpart, sideOf } from "@/lib/side";
 
 interface Hit { ticker: string; name: string; sic_description: string | null }
 
-// The whole header: side toggle, brand, links. Client-side so it knows the
-// current side from the path; it stays mounted across navigations.
+// The whole header: brand, links, side toggle. Client-side so it knows the
+// current side from the path; it stays mounted across navigations. The
+// side sets the theme (angel light, devil dark) through CSS :has() on the
+// header, so the server render already has the right colors.
 export function Header() {
   const path = usePathname();
+  const router = useRouter();
   const side = sideOf(path);
   const base = baseOf(side);
-  const cur = (href: string) => (path === href || (href !== base && href.length > 1 && path.startsWith(href)) ? "page" : undefined);
+  const cur = (href: string) => (path === href || (href.length > 1 && path.startsWith(`${href}/`)) ? "page" : undefined);
   const links: [string, string][] = side === "angel"
     ? [["/rollups", "Rollups"], ["/deals", "Model"]]
     : [["/pe/deals", "Deals"], ["/acquirers", "Acquirers"]];
+
+  // Resolves the pending view transition once the new page has rendered.
+  const done = useRef<(() => void) | null>(null);
+  useEffect(() => { done.current?.(); done.current = null; }, [path]);
+
+  const flip = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    const to = counterpart(path);
+    const doc = document as Document & { startViewTransition?: (cb: () => Promise<void>) => { ready: Promise<void> } };
+    if (!doc.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches || e.metaKey || e.ctrlKey) return;
+    e.preventDefault();
+    // A circle grows from the toggle until it covers the page.
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    const end = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+    const t = doc.startViewTransition(() => new Promise<void>((res) => {
+      done.current = res;
+      router.push(to, { scroll: false });
+      setTimeout(res, 3000); // never hang on a slow page
+    }));
+    t.ready.then(() => {
+      document.documentElement.animate(
+        { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${end}px at ${x}px ${y}px)`] },
+        { duration: 650, easing: "cubic-bezier(0.65, 0, 0.35, 1)", pseudoElement: "::view-transition-new(root)" },
+      );
+    });
+  };
+
+  const label = side === "angel" ? "Switch to the devil side: PE & activist takeovers" : "Switch to the angel side: AI rollups";
   return (
     <header className="header" data-side={side}>
       <div className="header-inner">
-        <div className="header-left">
-          <Link href={counterpart(path)} className="side-toggle" data-side={side} role="switch" aria-checked={side === "devil"}
-            aria-label={side === "angel" ? "Switch to PE & activist takeovers" : "Switch to AI rollups"}
-            title={side === "angel" ? "Switch to PE & activist takeovers" : "Switch to AI rollups"}>
-            <span className="side-opt" data-on={side === "angel"}>Angel</span>
-            <span className="side-opt" data-on={side === "devil"}>Devil</span>
-          </Link>
-          <Link href={base || "/"} className="brand"><PixelMark size={32} />Takeover
-            <span className="brand-sub">{side === "angel" ? "AI rollups" : "PE & activists"}</span></Link>
-        </div>
+        <Link href={base || "/"} className="brand"><PixelMark size={32} />Takeover
+          <span className="brand-sub">{side === "angel" ? "AI rollups" : "PE & activists"}</span></Link>
         <nav className="nav" aria-label="Primary">
           <Search base={base} />
           {links.map(([href, label]) => <Link key={href} href={href} aria-current={cur(href)}>{label}</Link>)}
+          <Link href={counterpart(path)} onClick={flip} className="side-toggle" data-side={side}
+            role="switch" aria-checked={side === "devil"} aria-label={label} title={label}>
+            <span className="side-knob" aria-hidden="true" />
+            <span className="side-opt" data-on={side === "angel"}><Sprite kind="angel" size={24} /></span>
+            <span className="side-opt" data-on={side === "devil"}><Sprite kind="devil" size={24} /></span>
+          </Link>
         </nav>
       </div>
     </header>
