@@ -411,26 +411,26 @@ function bare(mult: number): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-// Open-market buys against sells over 12 months: one bar each, same scale.
+// Open-market buys against sells over 12 months: the net as the headline,
+// then one split bar of buys vs sells, legend beneath.
 function Insiders({ t }: { t: Profile["insiders_365d"] }) {
-  const top = Math.max(t.buys, t.sells, 1);
-  const net = t.buys - t.sells;
-  const row = (label: string, v: number, n: number, kind: "buy" | "sell") => (
-    <li className="ins-row" data-kind={kind}>
-      <span className="ins-label">{label}</span>
-      <span className="ins-track" aria-hidden="true"><span style={{ width: `${Math.max((v / top) * 100, v ? 1.5 : 0)}%` }} /></span>
-      <span className="ins-v">{fmtUsd(v)}<span className="muted"> · {n} {n === 1 ? "trade" : "trades"}</span></span>
-    </li>
-  );
+  const net = t.buys - t.sells, total = t.buys + t.sells || 1;
+  const buyShare = (t.buys / total) * 100;
+  const trades = (n: number) => `${n} ${n === 1 ? "trade" : "trades"}`;
   return (
     <div className="insiders">
-      <ul aria-label="Open-market insider trades, last 12 months">
-        {row("Bought", t.buys, t.buy_count, "buy")}
-        {row("Sold", t.sells, t.sell_count, "sell")}
-      </ul>
-      <p className="muted ins-net">
-        Net {net >= 0 ? "buying" : "selling"} of <strong className={net >= 0 ? "pos" : "neg"}>{fmtUsd(Math.abs(net))}</strong> in open-market trades over the last 12 months.
-      </p>
+      <div className="ins-head">
+        <span className="ins-net" data-kind={net >= 0 ? "buy" : "sell"}>{net >= 0 ? "+" : "−"}{fmtUsd(Math.abs(net))}</span>
+        <span className="muted">net {net >= 0 ? "buying" : "selling"} by insiders, open market, last 12 months</span>
+      </div>
+      <div className="ins-split" role="img" aria-label={`Bought ${fmtUsd(t.buys)}, sold ${fmtUsd(t.sells)}`}>
+        {t.buys > 0 && <span data-kind="buy" style={{ width: `${Math.max(buyShare, 1.5)}%` }} />}
+        {t.sells > 0 && <span data-kind="sell" style={{ width: `${Math.max(100 - buyShare, 1.5)}%` }} />}
+      </div>
+      <div className="ins-legend">
+        <span><i data-kind="buy" />Bought <strong>{fmtUsd(t.buys)}</strong> <span className="muted">· {trades(t.buy_count)}</span></span>
+        <span><i data-kind="sell" />Sold <strong>{fmtUsd(t.sells)}</strong> <span className="muted">· {trades(t.sell_count)}</span></span>
+      </div>
     </div>
   );
 }

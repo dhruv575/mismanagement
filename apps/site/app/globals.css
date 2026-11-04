@@ -1173,16 +1173,16 @@ h1 .tk-name {
 .nav a.side-toggle { padding: 3px; border-radius: 999px; margin-left: 8px; }
 .nav a.side-toggle:hover { background: var(--surface-3); }
 
-/* Insider trading: buys vs sells on one scale. */
-.insiders ul { list-style: none; padding: 0; margin: 0; display: grid; gap: .625rem; max-width: 40rem; }
-.ins-row { display: grid; grid-template-columns: 4.5rem 1fr 11rem; gap: .875rem; align-items: center; }
-.ins-label { color: var(--text-secondary); }
-.ins-track { height: 10px; border-radius: 5px; background: var(--meter-track); overflow: hidden; }
-.ins-track > span { display: block; height: 100%; border-radius: 5px; }
-.ins-row[data-kind="buy"] .ins-track > span { background: var(--pos); }
-.ins-row[data-kind="sell"] .ins-track > span { background: var(--neg); }
-.ins-v { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
-.ins-net { margin: .875rem 0 0; }
-.ins-net .pos { color: var(--pos); }
-.ins-net .neg { color: var(--neg); }
-@media (max-width: 560px) { .ins-row { grid-template-columns: 3.75rem 1fr; } .ins-v { grid-column: 2; text-align: left; } }
+/* Insider trading: net headline, one split bar, legend. */
+.insiders { max-width: 40rem; padding: 1.125rem 1.25rem; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-2); }
+.ins-head { display: flex; align-items: baseline; gap: .625rem; flex-wrap: wrap; }
+.ins-net { font-size: 1.75rem; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.ins-net[data-kind="buy"] { color: var(--pos); }
+.ins-net[data-kind="sell"] { color: var(--neg); }
+.ins-split { display: flex; gap: 2px; height: 10px; margin: .875rem 0 .625rem; border-radius: 5px; overflow: hidden; background: var(--meter-track); }
+.ins-split > span { display: block; height: 100%; }
+.ins-split > [data-kind="buy"], .ins-legend i[data-kind="buy"] { background: var(--pos); }
+.ins-split > [data-kind="sell"], .ins-legend i[data-kind="sell"] { background: var(--neg); }
+.ins-legend { display: flex; justify-content: space-between; gap: .5rem 1.5rem; flex-wrap: wrap; font-size: .875rem; color: var(--text-secondary); }
+.ins-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: .4rem; vertical-align: 1px; }
+.ins-legend strong { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
