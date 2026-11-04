@@ -1111,17 +1111,17 @@ h1 .tk-name {
 }
 
 /* Angel / devil toggle (top right). The devil side is the dark theme. */
-.side-toggle {
-  position: relative; display: inline-flex; align-items: center; padding: 3px; border-radius: 999px;
+.nav a.side-toggle {
+  position: relative; display: inline-flex; align-items: center; gap: 0; padding: 3px; border-radius: 999px; box-sizing: content-box; height: 34px;
   background: var(--surface-3); border: 1px solid var(--line); text-decoration: none; flex-shrink: 0;
 }
 .side-knob {
-  position: absolute; top: 3px; left: 3px; width: 40px; height: 32px; border-radius: 999px;
+  position: absolute; top: 3px; left: 3px; width: 34px; height: 34px; border-radius: 50%;
   background: var(--surface-0); box-shadow: 0 1px 3px rgba(0,0,0,.18);
   transition: transform .45s var(--ease-out), background .45s;
 }
-.side-toggle[data-side="devil"] .side-knob { transform: translateX(40px); }
-.side-opt { position: relative; display: grid; place-items: center; width: 40px; height: 32px; transition: opacity .3s, transform .3s var(--ease-out); }
+.side-toggle[data-side="devil"] .side-knob { transform: translateX(34px); }
+.side-opt { position: relative; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; transition: opacity .3s, transform .3s var(--ease-out); }
 .side-opt[data-on="false"] { opacity: .45; filter: grayscale(1); }
 .side-toggle:hover .side-opt[data-on="false"] { opacity: .9; filter: none; transform: translateY(-1px); }
 .side-toggle:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
@@ -1162,3 +1162,13 @@ h1 .tk-name {
   --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.6);
 }
 .side-toggle[data-side="devil"] .side-knob { background: #3b2326; box-shadow: 0 0 0 1px rgba(248,113,113,.35), 0 1px 3px rgba(0,0,0,.5); }
+
+.signals-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem 2rem; flex-wrap: wrap; margin: 2rem 0 1rem; padding-bottom: .875rem; border-bottom: 1px solid var(--line); }
+.signals-head h2 { margin: 0 0 .25rem; }
+.signals-head p { margin: 0; }
+.signals-count { display: flex; flex-direction: column; align-items: flex-end; gap: .125rem; font-size: .875rem; }
+.signals-count strong { font-size: 1.75rem; line-height: 1; color: var(--hit-strong); font-variant-numeric: tabular-nums; }
+.signals-count > :first-child { display: flex; align-items: baseline; gap: .375rem; }
+@media (max-width: 560px) { .signals-count { align-items: flex-start; } }
+.nav a.side-toggle { padding: 3px; border-radius: 999px; margin-left: 8px; }
+.nav a.side-toggle:hover { background: var(--surface-3); }

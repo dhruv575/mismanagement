@@ -262,8 +262,16 @@ function Signals({ p }: { p: Profile }) {
           </div>
         </div>
       )}
-      <h2 id="score-h">Takeover signals <span className="muted">{p.scores ? `${fired.length} of ${all.length}` : "not scored yet"}</span></h2>
-      <p className="muted">Signs an activist or buyer would see an opportunity: cheap, overpaid, diluted or under pressure. <Link href="/pe/deals#backtest">How well they predict deals</Link></p>
+      <div className="signals-head">
+        <div>
+          <h2 id="score-h">Takeover signals</h2>
+          <p className="muted">What an activist or buyer would see: cheap, overpaid, diluted or under pressure.</p>
+        </div>
+        <div className="signals-count">
+          {p.scores ? <><strong>{fired.length}</strong><span className="muted"> of {all.length} fired</span></> : <span className="muted">Not scored yet</span>}
+          <Link href="/pe/deals#backtest">How well they predict deals →</Link>
+        </div>
+      </div>
       {fired.length > 0 ? <SignalGrid keys={fired} scores={p.scores} marketCap={co.market_cap} /> : <p className="muted">No signals fired.</p>}
       {rest.length > 0 && (
         <details className="other-signals">
