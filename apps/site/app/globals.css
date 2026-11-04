@@ -1168,7 +1168,7 @@ h1 .tk-name {
 .signals-head p { margin: 0; }
 .signals-count { display: flex; flex-direction: column; align-items: flex-end; gap: .125rem; font-size: .875rem; }
 .signals-count strong { font-size: 1.75rem; line-height: 1; color: var(--hit-strong); font-variant-numeric: tabular-nums; }
-.signals-count > :first-child { display: flex; align-items: baseline; gap: .375rem; }
+.signals-num { display: flex; align-items: baseline; gap: .375rem; }
 @media (max-width: 560px) { .signals-count { align-items: flex-start; } }
 .nav a.side-toggle { padding: 3px; border-radius: 999px; margin-left: 8px; }
 .nav a.side-toggle:hover { background: var(--surface-3); }

@@ -268,7 +268,7 @@ function Signals({ p }: { p: Profile }) {
           <p className="muted">What an activist or buyer would see: cheap, overpaid, diluted or under pressure.</p>
         </div>
         <div className="signals-count">
-          {p.scores ? <><strong>{fired.length}</strong><span className="muted"> of {all.length} fired</span></> : <span className="muted">Not scored yet</span>}
+          {p.scores ? <span className="signals-num"><strong>{fired.length}</strong><span className="muted">of {all.length} fired</span></span> : <span className="muted">Not scored yet</span>}
           <Link href="/pe/deals#backtest">How well they predict deals →</Link>
         </div>
       </div>
