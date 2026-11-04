@@ -257,7 +257,7 @@ function Signals({ p }: { p: Profile }) {
         <div className="verdict" data-high={mult >= 3}>
           <div className="verdict-num">{fmtMultiple(mult)}</div>
           <div>
-            <h2 id="pe-h">{likelihoodPhrase(mult)} to be taken private</h2>
+            <h2 id="pe-h">{bare(mult)} to be taken private</h2>
             <p className="muted">{pct != null && <>Top {topShare(pct)} of the Russell 3000 for a buyout by a private-equity firm, holdco or insiders. </>}<Link href="/pe/deals#model">How it works</Link></p>
           </div>
         </div>
@@ -363,7 +363,7 @@ function SponsorOdds({ s }: { s: Record<string, unknown> }) {
     <section aria-labelledby="sponsor-h" className="verdict" data-high={mult >= 3}>
       <div className="verdict-num">{fmtMultiple(mult)}</div>
       <div>
-        <h2 id="sponsor-h">{likelihoodPhrase(mult)} to be bought by an AI rollup</h2>
+        <h2 id="sponsor-h">{bare(mult)} to be bought by an AI rollup</h2>
         <p className="muted">{pct != null && <>Top {topShare(pct)} of the Russell 3000. </>}<Link href="/deals#model">How it works</Link></p>
       </div>
       {s.business_summary != null && <p className="verdict-summary">{String(s.business_summary)}</p>}
@@ -415,4 +415,11 @@ function DealTable({ deals }: { deals: Profile["deals"] }) {
 function topShare(pct: number): string {
   const top = (1 - pct) * 100;
   return top < 1 ? "1%" : `${Math.round(top)}%`;
+}
+
+// The phrase without its leading number, for next to the big multiple:
+// "more likely than average", "less likely than average", "About as likely as average".
+function bare(mult: number): string {
+  const s = likelihoodPhrase(mult).replace(/^[0-9.]+× /, "");
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
