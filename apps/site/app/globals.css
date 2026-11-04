@@ -1161,3 +1161,4 @@ h1 .tk-name {
   --pos: #34d399;
   --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.6);
 }
+.side-toggle[data-side="devil"] .side-knob { background: #3b2326; box-shadow: 0 0 0 1px rgba(248,113,113,.35), 0 1px 3px rgba(0,0,0,.5); }
