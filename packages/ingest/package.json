@@ -26,6 +26,7 @@
     "experiment": "tsx src/experiment.ts",
     "track-deals": "tsx src/track-deals.ts",
     "track-news": "tsx src/track-news.ts",
+    "sponsor-model": "tsx src/sponsor-model.ts",
     "fit-model": "tsx src/fit-model.ts",
     "screen": "tsx src/screen.ts",
     "typecheck": "tsc --noEmit"
