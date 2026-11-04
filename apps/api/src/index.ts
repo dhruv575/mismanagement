@@ -735,6 +735,18 @@ async function sponsorMeta(): Promise<{ base_rate: number; positives: number; ro
   return r.rows[0]?.metrics ?? null;
 }
 
+// Russell 3000 companies by AI-rollup likelihood band, for the home chart.
+const BANDS: [string, number, number][] = [
+  ["<0.5×", 0, 0.5], ["0.5–1×", 0.5, 1], ["1–2×", 1, 2], ["2–3×", 2, 3], ["3–5×", 3, 5], ["5–10×", 5, 10], ["10×+", 10, Infinity],
+];
+async function likelihoodBands(minMcap: number): Promise<{ label: string; min: number; count: number }[]> {
+  const r = await pool().query<{ multiple: number }>(
+    `select ss.multiple from sponsor_scores ss join companies c using (cik)
+      where c.is_russell_3000 and (c.market_cap_at_universe_pull is null or c.market_cap_at_universe_pull >= $1::float8)`, [minMcap],
+  ).catch(() => ({ rows: [] as { multiple: number }[] }));
+  return BANDS.map(([label, lo, hi]) => ({ label, min: lo, count: r.rows.filter((x) => x.multiple >= lo && x.multiple < hi).length }));
+}
+
 app.get("/leaderboard", async (c) => {
   const minMcap = Number(c.req.query("min_mcap") ?? 500e6);
   const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 100), 1), 3000);
@@ -802,6 +814,7 @@ app.get("/leaderboard", async (c) => {
     max_score: SIGNAL_COUNT,
     distribution: dist.rows.map((d) => ({ score: Number(d.score), count: Number(d.n) })),
     sponsor_3x: dist.rows.reduce((a, d) => a + Number(d.sponsor_3x), 0),
+    likelihood: await likelihoodBands(minMcap),
     sponsor: await sponsorMeta(),
     refreshed_at: dist.rows.reduce<string | null>((m, d) => (m && m > d.refreshed_at ? m : d.refreshed_at), null),
     rows: slim,

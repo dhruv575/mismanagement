@@ -732,7 +732,7 @@ h1 .tk-name {
 
 .summary {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
   gap: 32px;
   align-items: end;
   padding-bottom: 32px;
@@ -1082,4 +1082,9 @@ h1 .tk-name {
 .other-signals > summary { cursor: pointer; color: var(--text-secondary); margin-bottom: .75rem; }
 .business-line { white-space: normal; }
 .sponsor-h[data-high="true"] { color: var(--hit-strong); }
-.summary .hero-label { max-width: 46ch; }
+
+/* Home: latest AI-rollup deals, one line each */
+.rollup-feed { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line-subtle); }
+.rollup-feed li { display: grid; grid-template-columns: 7.5rem 1fr; gap: 1rem; padding: .6rem 0; border-bottom: 1px solid var(--line-subtle); }
+.rollup-feed .date { font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .rollup-feed li { grid-template-columns: 1fr; gap: .15rem; } }
