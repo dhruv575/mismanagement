@@ -75,29 +75,54 @@ function EvidenceTable({ rows, outcome }: { rows: FactorEvidenceRow[]; outcome: 
   );
 }
 
-// A company's factors that both scored high (7+) and carry a clear record.
+// When the 10-K scores a factor low (under 3), how to say it.
+const LOW_LABEL: Record<string, string> = {
+  services_share: "Mostly products, not services", labor_intensity: "Not labor-intensive", ai_automatable: "Little AI-automatable work",
+  fragmented_market: "Concentrated market", recurring_revenue: "Little recurring revenue", rollup_fit: "Poor AI-rollup fit",
+  office_work: "Office work isn't the product", people_services: "Not people-delivered services", payroll_heavy: "Payroll isn't the main cost",
+  many_small_rivals: "Few small rivals", contracted: "Little contracted revenue", rollup_target: "Not an AI-rollup target",
+  software_platform: "Not software or a platform", b2b: "Sells to consumers", asset_light: "Asset-heavy", physical_ops: "No physical operations",
+  regulated: "Lightly regulated", gov_customers: "No government customers", customer_concentration: "Diversified customers",
+  acquisitive: "Not an acquirer", niche_leader: "Not a niche leader", us_focused: "Mostly outside the U.S.", growth_stage: "Mature business",
+  disruption_risk: "Not threatened by technology", pricing_power: "Little pricing power", portfolio_change: "No portfolio changes",
+  restructuring: "No restructuring",
+};
+const LOW = 3, HIGH = 7;
+
+interface Chip { key: string; label: string; lift: number; tip: string }
+
+// A company's factors with a clear record: scored high on a factor that moves the
+// odds, or low on one whose absence does. Strongest first, ups and downs apart.
 export function FactorChips({ factors, meta, side, exclude = [] }: { factors: Record<string, number> | null | undefined; meta: ModelMeta | null | undefined; side: "angel" | "devil"; exclude?: string[] }) {
   if (!factors || !meta?.factors) return null;
   const base = meta.positives / meta.rows;
-  const hits = meta.factors
-    .filter((f) => !exclude.includes(f.name) && solid(f, base) && (factors[f.name] ?? 0) >= 7 && (f.lift_high! >= UP || f.lift_high! <= DOWN))
-    .sort((a, b) => Math.abs(Math.log(Math.max(b.lift_high!, 0.05))) - Math.abs(Math.log(Math.max(a.lift_high!, 0.05))))
-    .slice(0, 6);
-  if (!hits.length) return null;
   const what = side === "angel" ? "a sponsor buyout of a services business" : "a take-private";
-  return (
+  const n = (x: number) => x.toLocaleString("en-US");
+  const chips: Chip[] = [];
+  for (const f of meta.factors) {
+    const v = factors[f.name];
+    if (exclude.includes(f.name) || v == null) continue;
+    if (v >= HIGH && solid(f, base) && (f.lift_high! >= UP || f.lift_high! <= DOWN))
+      chips.push({ key: f.name, label: f.label, lift: f.lift_high!, tip: `${f.deals_high} of ${n(f.n_high)} companies whose 10-K read like this saw ${what} within a year (${f.lift_high!.toFixed(1)}× average)` });
+    else if (v < LOW && f.lift_low != null && f.n_low >= 100 && f.n_low * base >= 2.5 && f.lift_low <= DOWN)
+      chips.push({ key: f.name, label: LOW_LABEL[f.name] ?? `Low: ${f.label.toLowerCase()}`, lift: f.lift_low, tip: `Of ${n(f.n_low)} companies scoring low on "${f.label.toLowerCase()}", ${what} came ${f.lift_low.toFixed(1)}× as often as average` });
+  }
+  const strength = (c: Chip) => Math.abs(Math.log(Math.max(c.lift, 0.05)));
+  const ups = chips.filter((c) => c.lift > 1).sort((a, b) => strength(b) - strength(a)).slice(0, 4);
+  const downs = chips.filter((c) => c.lift < 1).sort((a, b) => strength(b) - strength(a)).slice(0, 4);
+  if (!ups.length && !downs.length) return null;
+  const row = (cs: Chip[], up: boolean, head: string) => cs.length > 0 && (
     <div className="factor-chips">
-      <span className="muted">From the 10-K:</span>
+      <span className="muted">{head}</span>
       <ul>
-        {hits.map((f) => {
-          const up = f.lift_high! >= UP;
-          return (
-            <li key={f.name} data-up={up} title={`${f.deals_high} of ${f.n_high.toLocaleString("en-US")} companies like this saw ${what} within a year (${f.lift_high!.toFixed(1)}× average)`}>
-              <span aria-hidden="true">{up ? "↑" : "↓"}</span>{f.label}
-            </li>
-          );
-        })}
+        {cs.map((c) => (
+          <li key={c.key} data-up={up} data-down={!up} title={c.tip}>
+            <span aria-hidden="true">{up ? "↑" : "↓"}</span>{c.label}
+            <span className="chip-lift">{c.lift < 0.1 ? "<0.1" : c.lift.toFixed(1)}×</span>
+          </li>
+        ))}
       </ul>
     </div>
   );
+  return <>{row(ups, true, "In its favor:")}{row(downs, false, "Against it:")}</>;
 }
