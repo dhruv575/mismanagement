@@ -1224,3 +1224,5 @@ h1 .tk-name {
 .pattern-lift { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pattern-col p { font-size: .8125rem; margin: 0; }
 @media (max-width: 560px) { .pattern-cols { grid-template-columns: 1fr; } }
+.verdict > .flag-grid { grid-column: 1 / -1; margin-top: .5rem; }
+.patterns .flag-grid { margin-top: .5rem; }

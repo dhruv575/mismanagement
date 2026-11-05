@@ -339,6 +339,14 @@ function SignalGrid({ keys, scores, marketCap }: { keys: readonly string[]; scor
   );
 }
 
+const BUSINESS_RULES: Record<string, string> = {
+  services_share: "How much of revenue is services rather than products or software. Weighs most.",
+  labor_intensity: "How much of the cost is people doing the work.",
+  recurring_revenue: "Subscriptions, contracts and repeat customers.",
+  fragmented_market: "Many small competitors a buyer could roll up.",
+  rollup_fit: "Jev's overall read on fit for an AI rollup.",
+  ai_automatable: "Share of the work AI could plausibly do.",
+};
 // Roughly in order of how much they move the score.
 const BUSINESS_ROWS: [string, string][] = [
   ["services_share", "Services share"],
@@ -364,15 +372,19 @@ function SponsorOdds({ s, chips }: { s: Record<string, unknown>; chips?: React.R
       </div>
       {s.business_summary != null && <p className="verdict-summary">{String(s.business_summary)}</p>}
       {scores.length > 0 && <>
-        <h3 className="biz-head">What the score is built on <span className="muted">· read from the 10-K, out of 10</span></h3>
-        <ul className="biz-bars" aria-label="What the 10-K says about the business, out of 10">
+        <h3 className="biz-head">What the score is built on <span className="muted">· read from the 10-K by Jev, out of 10; tick marks high</span></h3>
+        <ul className="flag-grid">
           {scores.map(([k, label]) => {
             const v = Number(s[k]);
             return (
-              <li key={k}>
-                <span>{label}</span>
-                <span className="biz-track" aria-hidden="true"><span style={{ width: `${Math.min(v, 10) * 10}%` }} /></span>
-                <span className="biz-v">{Math.round(v)}<span className="muted">/10</span></span>
+              <li key={k} className="flag-cell" data-fired={v >= 7}>
+                <div className="flag-cell-top">
+                  <span>{label}</span>
+                  <span className="flag-state">{v >= 7 ? "High" : v < 3 ? "Low" : "Middling"}</span>
+                </div>
+                <div className="flag-value">{Math.round(v)}<span className="muted">/10</span></div>
+                <Meter value={v} threshold={7} max={10} fired={v >= 7} label={`${label}: ${Math.round(v)} out of 10`} />
+                <div className="flag-rule muted">{BUSINESS_RULES[k]}</div>
               </li>
             );
           })}

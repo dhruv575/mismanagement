@@ -1,3 +1,4 @@
+import { Meter } from "@/lib/charts";
 // What Jev read in the 10-K, and how often that preceded a deal.
 // FactorEvidence: the model pages' table (every factor, with its record).
 // FactorChips: a company page's notable factors, pointing up or down.
@@ -112,26 +113,26 @@ export function FactorChips({ factors, meta, side, exclude = [] }: { factors: Re
   const ups = chips.filter((c) => c.lift >= 2).sort((a, b) => strength(b) - strength(a)).slice(0, 3);
   const downs = chips.filter((c) => c.lift <= 0.5).sort((a, b) => strength(b) - strength(a)).slice(0, 3);
   if (!ups.length && !downs.length) return null;
-  const col = (cs: Chip[], up: boolean, head: string) => (
-    <div className="pattern-col" data-up={up}>
-      <h4>{head}</h4>
-      {cs.length ? (
-        <ul>
-          {cs.map((c) => (
-            <li key={c.key} title={c.tip}>
-              <span>{c.label}</span>
-              <span className="pattern-lift">{c.lift < 0.1 ? "almost never" : `${c.lift.toFixed(1)}× as often`}</span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </div>
-  );
+  // Meter: average in the middle (the tick), 10x at the right end, 1/10x at the left.
+  const pos = (l: number) => 1 + Math.max(-1, Math.min(1, Math.log10(Math.max(l, 0.01))));
+  const cards = [...ups.map((c) => ({ c, up: true })), ...downs.map((c) => ({ c, up: false }))];
   return (
     <div className="patterns">
       <h3>Other things in the 10-K that mattered in past deals</h3>
-      <p className="muted">Not part of the score above. How often companies whose 10-K read the same way went on to {what}, compared with the average company.</p>
-      <div className="pattern-cols">{ups.length > 0 && col(ups, true, "Pointing toward a deal")}{downs.length > 0 && col(downs, false, "Pointing away from one")}</div>
+      <p className="muted">Not part of the score. How often companies whose 10-K read the same way went on to {what}, against the average company (the tick).</p>
+      <ul className="flag-grid">
+        {cards.map(({ c, up }) => (
+          <li key={c.key} className="flag-cell" data-fired={up}>
+            <div className="flag-cell-top">
+              <span>{c.label}</span>
+              <span className="flag-state">{up ? "Toward a deal" : "Away from one"}</span>
+            </div>
+            <div className="flag-value">{c.lift < 0.1 ? "Almost never" : `${c.lift.toFixed(1)}× as often`}</div>
+            <Meter value={pos(c.lift)} threshold={1} max={2} fired={up} label={`${c.label}: ${c.lift.toFixed(1)}× average`} />
+            <div className="flag-rule muted">{c.tip}</div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
