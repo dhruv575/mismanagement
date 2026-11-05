@@ -120,18 +120,18 @@ export function FactorChips({ factors, meta, side, exclude = [] }: { factors: Re
           {cs.map((c) => (
             <li key={c.key} title={c.tip}>
               <span>{c.label}</span>
-              <span className="pattern-lift">{c.lift < 0.1 ? "almost never" : up ? `${c.lift.toFixed(1)}× as often` : `${c.lift.toFixed(1)}× as often`}</span>
+              <span className="pattern-lift">{c.lift < 0.1 ? "almost never" : `${c.lift.toFixed(1)}× as often`}</span>
             </li>
           ))}
         </ul>
-      ) : <p className="muted">Nothing notable.</p>}
+      ) : null}
     </div>
   );
   return (
     <div className="patterns">
       <h3>Other things in the 10-K that mattered in past deals</h3>
       <p className="muted">Not part of the score above. How often companies whose 10-K read the same way went on to {what}, compared with the average company.</p>
-      <div className="pattern-cols">{col(ups, true, "Pointing toward a deal")}{col(downs, false, "Pointing away")}</div>
+      <div className="pattern-cols">{ups.length > 0 && col(ups, true, "Pointing toward a deal")}{downs.length > 0 && col(downs, false, "Pointing away from one")}</div>
     </div>
   );
 }
