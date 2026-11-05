@@ -1186,3 +1186,24 @@ h1 .tk-name {
 .ins-legend { display: flex; justify-content: space-between; gap: .5rem 1.5rem; flex-wrap: wrap; font-size: .875rem; color: var(--text-secondary); }
 .ins-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: .4rem; vertical-align: 1px; }
 .ins-legend strong { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* What the 10-K says: factor evidence (model pages) and chips (company pages). */
+.factor-table td:first-child { white-space: nowrap; }
+.factor-table .lift-col { width: 42%; min-width: 180px; }
+.lift-cell { display: flex; align-items: center; gap: 10px; }
+.lift-bar { position: relative; flex: 1; height: 8px; border-radius: 4px; background: var(--meter-track); }
+.lift-bar::after { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--line-strong); }
+.lift-fill { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--neg); opacity: .75; }
+.lift-fill[data-up="true"] { background: var(--hit); opacity: 1; }
+.lift-v { width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+.lift-v[data-up="true"] { color: var(--hit-strong); font-weight: 600; }
+.lift-v[data-down="true"] { color: var(--neg); }
+.in-model { margin-left: .5rem; font-size: .6875rem; font-weight: 600; letter-spacing: .02em; text-transform: uppercase;
+  color: var(--text-muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 6px; vertical-align: 1px; }
+.reader-note { font-size: .8125rem; margin-top: .5rem; }
+.factor-chips { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: .8125rem; margin-top: .25rem; }
+.factor-chips ul { display: contents; list-style: none; }
+.factor-chips li { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px;
+  background: var(--surface-3); color: var(--text-muted); cursor: help; }
+.factor-chips li[data-up="true"] { background: var(--hit-soft); color: var(--hit-strong); }
+@media (max-width: 560px) { .factor-table .lift-col { min-width: 120px; } .factor-table td:first-child { white-space: normal; } }

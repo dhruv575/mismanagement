@@ -10,6 +10,7 @@ import { SIGNAL_LABELS, SIGNAL_RULES, signalEvidence, signalMeasure, type Signal
 import { Delta, Meter, Sparkline } from "@/lib/charts";
 
 import { baseOf, type Side } from "@/lib/side";
+import { FactorChips, type ModelMeta } from "@/lib/factors-view";
 
 type Num = number | null;
 interface Profile {
@@ -31,6 +32,11 @@ const getProfile = cache(async (ticker: string): Promise<Profile | null> => {
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`profile ${ticker}: ${res.status}`);
   return (await res.json()) as Profile;
+});
+
+const getModels = cache(async (): Promise<{ sponsor: ModelMeta | null; pe: ModelMeta | null }> => {
+  const res = await app.request("/api/models");
+  return res.ok ? ((await res.json()) as { sponsor: ModelMeta | null; pe: ModelMeta | null }) : { sponsor: null, pe: null };
 });
 
 const FIN_ROWS: [string, string][] = [
@@ -80,8 +86,9 @@ export async function companyMetadata(ticker: string, side: Side): Promise<Metad
 }
 
 export async function CompanyView({ ticker, side }: { ticker: string; side: Side }) {
-  const p = await getProfile(ticker);
+  const [p, models] = await Promise.all([getProfile(ticker), getModels()]);
   if (!p) notFound();
+  const factors = (p.scores?.business_factors ?? null) as Record<string, number> | null;
   const { company: co, financials: fin, derived: d } = p;
   const yrs = fin.years;
   const yl = yrs.map((y) => `FY${y}`);
@@ -122,8 +129,8 @@ export async function CompanyView({ ticker, side }: { ticker: string; side: Side
         </p>
       </header>
 
-      {side === "angel" && (p.scores?.sponsor_prob != null ? <SponsorOdds s={p.scores} /> : <p className="muted">Not scored by the AI-rollup model yet.</p>)}
-      {side === "devil" && <Signals p={p} />}
+      {side === "angel" && (p.scores?.sponsor_prob != null ? <SponsorOdds s={p.scores} chips={<FactorChips factors={factors} meta={models.sponsor} side="angel" exclude={BUSINESS_ROWS.map(([k]) => k)} />} /> : <p className="muted">Not scored by the AI-rollup model yet.</p>)}
+      {side === "devil" && <Signals p={p} chips={<FactorChips factors={factors} meta={models.pe} side="devil" />} />}
 
       {p.deals.length > 0 && <DealTable deals={p.deals} />}
 
@@ -241,7 +248,7 @@ export async function CompanyView({ ticker, side }: { ticker: string; side: Side
 }
 
 // Devil side headline: how many takeover signals fired, then the evidence.
-function Signals({ p }: { p: Profile }) {
+function Signals({ p, chips }: { p: Profile; chips?: React.ReactNode }) {
   const all = p.groups.flatMap((g) => g.signals);
   const fired = all.filter((k) => p.scores?.[k] === true), rest = all.filter((k) => p.scores?.[k] !== true);
   const co = p.company;
@@ -256,6 +263,7 @@ function Signals({ p }: { p: Profile }) {
             <h2 id="pe-h">{bare(mult)} to be taken private</h2>
             <p className="muted">{pct != null && <>Top {topShare(pct)} of the Russell 3000 for a buyout by a private-equity firm, holdco or insiders. </>}<Link href="/pe/deals#model">How it works</Link></p>
           </div>
+          {chips}
         </div>
       )}
       <div className="signals-head">
@@ -342,7 +350,7 @@ const BUSINESS_ROWS: [string, string][] = [
 
 // The verdict: how much likelier than average an AI rollup, holdco or PE firm
 // is to buy this company, and the 10-K business scores behind it.
-function SponsorOdds({ s }: { s: Record<string, unknown> }) {
+function SponsorOdds({ s, chips }: { s: Record<string, unknown>; chips?: React.ReactNode }) {
   const mult = Number(s.sponsor_multiple);
   const pct = s.sponsor_percentile != null ? Number(s.sponsor_percentile) : null;
   const scores = BUSINESS_ROWS.filter(([k]) => s[k] != null);
@@ -354,6 +362,7 @@ function SponsorOdds({ s }: { s: Record<string, unknown> }) {
         <p className="muted">{pct != null && <>Top {topShare(pct)} of the Russell 3000. </>}<Link href="/deals#model">How it works</Link></p>
       </div>
       {s.business_summary != null && <p className="verdict-summary">{String(s.business_summary)}</p>}
+      {chips}
       {scores.length > 0 && (
         <ul className="biz-bars" aria-label="What the 10-K says about the business, out of 10">
           {scores.map(([k, label]) => {
@@ -361,8 +370,8 @@ function SponsorOdds({ s }: { s: Record<string, unknown> }) {
             return (
               <li key={k}>
                 <span>{label}</span>
-                <span className="biz-track" aria-hidden="true"><span style={{ width: `${v * 10}%` }} /></span>
-                <span className="biz-v">{v}<span className="muted">/10</span></span>
+                <span className="biz-track" aria-hidden="true"><span style={{ width: `${Math.min(v, 10) * 10}%` }} /></span>
+                <span className="biz-v">{Math.round(v)}<span className="muted">/10</span></span>
               </li>
             );
           })}

@@ -46,12 +46,20 @@ Missing inputs never fire a signal. The two percentile signals recalibrate on ev
 
 The Deals page carries a point-in-time backtest. For each April 1 since 2019, every company with at least $500M of public float, including ones since bought and delisted, is scored using only what it had filed by then, and labeled by whether a merger proxy, tender offer or going-private filing followed within 12 months. Seven of the thirteen signals can be rebuilt that way; the other six need history the database doesn't keep. See [docs/data-model.md](docs/data-model.md#point-in-time-backtest).
 
-The site's ranking is a separate model aimed at AI-rollup-style acquisitions: a private-equity firm, sponsor-backed platform, holdco or insider group buying a services business. AI rollups themselves are too recent to backtest, so this is their closest precedent. Claude Haiku 5.5 (via the gateway) classifies each historical deal's buyer from the deal document, and scores each company's business from the Item 1 section of its pre-deal 10-K (recurring revenue, services share, labor intensity, work AI could do, fragmentation, rollup fit). A logistic regression on size, goodwill, 13D activity and those scores, trained on earlier years and tested on each of 2020–2024, puts about 6.7× the average rate of these buyouts in its top tenth (24 test positives, so a rough figure). `experiment.ts` compares labels and feature sets; `sponsor-model.ts` fits and applies the model.
+The site's rankings come from two models fit on that panel. Claude Haiku 5.5 (via the gateway) classifies each historical deal's buyer from the deal document. Jev, TypeSafe AI's decision model (also via the gateway, `/v1/decisions`), reads the Item 1 section of each company's 10-K and answers 40 typed questions about it in one request (`factors.ts`): services share, contracted revenue, regulation, ownership, restructuring and so on, for about $0.0002 a filing.
+
+- **`pe`** (devil side): a private-equity firm, sponsor-backed platform, holdco or insider group buys the company within 12 months (144 positives). Logistic regression on size, goodwill, 13D activity and eight Jev factors. Trained on earlier years and tested on each of 2020–2024: AUC 0.79, top decile about 4.1× the average rate (nested forward selection, the fully honest estimate of picking factors, gives 0.77).
+- **`sponsor`** (angel side): the same buyers buying a services business, the closest precedent for an AI-rollup deal. Two-stage: the `pe` odds times Jev's services share squared (so software with high take-private odds doesn't pass as a rollup target). AUC 0.93, top decile about 7.1× on the 33 such buyouts (24 test positives, so rough); 0.96 and 8.2× on the 13 buyouts of people-heavy firms.
+
+The multiple a company shows ("N× as likely as average") is the lift its rank band actually achieved out of sample in 2020–2024, shrunk toward 1× where bands are thin and interpolated by rank, so it can't run past what the backtest supports.
+
+`experiment2.ts` compares Haiku and Jev scores, every factor's marginal value, nested selection and the two-stage model; `experiment-gbm.ts` tries boosted trees; `sponsor-model.ts` fits and applies both models. The factor evidence (how often companies scoring high on each factor were bought) is stored with each model and shown on the model pages.
 
 ```sh
 pnpm --filter @takeover/ingest pull-panel-10k   # pre-deal 10-K for every backtest company-year
 pnpm --filter @takeover/ingest classify-deals   # buyer type for each backtest deal (LLM)
-pnpm --filter @takeover/ingest score-business   # business-model scores per company (LLM)
+pnpm --filter @takeover/ingest pull-business-text # Item 1 excerpts (backtest panel + current universe)
+pnpm --filter @takeover/ingest score-factors      # Jev factor scores for every stored excerpt
 pnpm --filter @takeover/ingest experiment       # compare labels and feature sets
 pnpm --filter @takeover/ingest sponsor-model    # fit, score current 10-Ks, write sponsor_scores
 ```

@@ -64,19 +64,51 @@ const addMonths = (d: string, m: number) => {
 };
 
 // Item 1 (Business): the heading that starts real text rather than the
-// table of contents, i.e. the one followed by the most text before Item 1A/2.
-export function businessExcerpt(text: string): string | null {
-  const heads = [...text.matchAll(/item\s*1\s*[.:\-–—]?\s*business\b/gi)].map((m) => m.index!);
+// table of contents or a cross-reference ('see "Item 1. Business—Our
+// Company"' inside the risk factors, which used to win because it ran on
+// to Item 2). A real heading is not preceded by see/in/under/a quote, and
+// its section ends at Item 1A when the filing has one; the longest such
+// section wins. Excerpts that still read like risk factors are rejected.
+// Letters may be split by markup ("Propertie s"), so words allow inner spaces.
+const word = (w: string) => w.split("").join(String.raw`\s?`);
+const ITEM = String.raw`i\s?t\s?e\s?m\s*`, SEP = String.raw`\s*[.:\-–—]?\s*`;
+const HEAD = new RegExp(`${ITEM}1${SEP}${word("business")}`, "gi");
+const END = new RegExp(`${ITEM}1\\s?a${SEP}${word("risk")}|${ITEM}2${SEP}${word("propert")}`, "gi");
+const RISKY = /\b(may|could|might) (materially |adversely |negatively |significantly )*(adversely affect|harm|be adversely|have an adverse|have a material adverse)/gi;
+// A mention rather than a heading: 'see "Item 1A. Risk Factors"', 'in Part I, Item 1: Business,'.
+const isRef = (text: string, at: number) => {
+  const before = text.slice(Math.max(0, at - 40), at);
+  return /(see|in|under|refer to|described|discussed|included|and|our)\s*["“'(]?\s*(part\s*i\s*[,.\-–—]*\s*)?$/i.test(before) || /["“(]\s*(part\s*i\s*[,.\-–—]*\s*)?$/i.test(before);
+};
+export function businessExcerpt(text: string, maxChars = EXCERPT_CHARS): string | null {
   let best: { at: number; len: number } | null = null;
-  for (const at of heads) {
-    const rest = text.slice(at + 10, at + 200_000);
-    const end = rest.search(/item\s*1a\s*[.:\-–—]?\s*risk|item\s*2\s*[.:\-–—]?\s*propert/i);
-    const len = end < 0 ? rest.length : end;
+  for (const m of text.matchAll(HEAD)) {
+    const at = m.index!;
+    if (isRef(text, at)) continue;
+    // The section ends at the next Item 1A or Item 2 heading that isn't itself a reference.
+    let end = -1;
+    END.lastIndex = at + 10;
+    for (let e = END.exec(text); e; e = END.exec(text)) { if (!isRef(text, e.index)) { end = e.index; break; } if (e.index > at + 400_000) break; }
+    const len = (end < 0 ? Math.min(text.length, at + 400_000) : end) - at;
     if (!best || len > best.len) best = { at, len };
   }
   if (!best || best.len < 1500) return null;
-  return text.slice(best.at, best.at + Math.min(best.len, EXCERPT_CHARS)).replace(/\s+/g, " ").trim();
+  let body = text.slice(best.at, best.at + best.len);
+  // Drop a forward-looking-statements preamble: it is all "could adversely
+  // affect" and says nothing about the business. It ends at the first
+  // business heading after it.
+  const fls = body.slice(0, 600).search(/cautionary|forward[- ]looking/i);
+  if (fls >= 0) {
+    const after = body.slice(fls + 200, fls + 15_000).search(/\b(overview|general|our company|company overview|introduction|our business|description of (the )?business)\b/i);
+    if (after >= 0) body = `${body.slice(0, fls)} ${body.slice(fls + 200 + after)}`;
+  }
+  const out = body.slice(0, maxChars).replace(/\s+/g, " ").trim();
+  return out.length < 1500 || riskDensity(out) > RISK_MAX ? null : out;
 }
+// Real Business sections (forward-looking boilerplate included) stay under this.
+export const RISK_MAX = 3;
+// Risk-factor phrases per 1,000 words; real Business sections sit well under 1.
+export const riskDensity = (s: string) => ((s.match(RISKY)?.length ?? 0) / Math.max(1, s.length / 6)) * 1000;
 
 async function main(): Promise<void> {
   const concurrency = parseInt(process.argv.find((a) => a.startsWith("--concurrency="))?.split("=")[1] ?? "4", 10);

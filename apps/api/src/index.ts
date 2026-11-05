@@ -334,7 +334,7 @@ app.get("/companies/:ticker/profile", async (c) => {
                where d.cik = ts.cik and dc.issuer_acquired and not d.is_self_filed
                  and d.filing_date > now() - interval '12 months') as deal_pending, ss.percentile as sponsor_percentile,
         cb.services_share, cb.labor_intensity, cb.ai_automatable, cb.fragmented_market, cb.recurring_revenue, cb.rollup_fit,
-        cb.summary as business_summary, cb.filing_date::text as business_filing_date, cb.accession_number as business_accession
+        cb.summary as business_summary, cb.filing_date::text as business_filing_date, cb.accession_number as business_accession, cb.factors as business_factors, cb.model as business_model
       from takeover_scores ts left join sponsor_scores ss using (cik) left join pe_scores pe using (cik) left join current_business cb using (cik) where ts.cik = $1`, [cik]),
     pool().query<{ fiscal_year: number; employees: number; matched_text: string; accession_number: string }>(
       `select fiscal_year, employees, matched_text, accession_number from headcount
@@ -748,6 +748,9 @@ async function likelihoodBands(minMcap: number, table = "sponsor_scores"): Promi
   ).catch(() => ({ rows: [] as { multiple: number }[] }));
   return BANDS.map(([label, lo, hi]) => ({ label, min: lo, count: r.rows.filter((x) => x.multiple >= lo && x.multiple < hi).length }));
 }
+
+// Both models' metadata and factor evidence (small; company pages use it).
+app.get("/models", async (c) => c.json({ sponsor: await sponsorMeta(), pe: await sponsorMeta("pe") }));
 
 app.get("/leaderboard", async (c) => {
   const minMcap = Number(c.req.query("min_mcap") ?? 500e6);

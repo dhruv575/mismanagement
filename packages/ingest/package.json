@@ -27,6 +27,9 @@
     "track-deals": "tsx src/track-deals.ts",
     "track-news": "tsx src/track-news.ts",
     "sponsor-model": "tsx src/sponsor-model.ts",
+    "pull-business-text": "tsx src/pull-business-text.ts",
+    "score-factors": "tsx src/score-factors.ts",
+    "experiment2": "tsx src/experiment2.ts",
     "fit-model": "tsx src/fit-model.ts",
     "screen": "tsx src/screen.ts",
     "typecheck": "tsc --noEmit"

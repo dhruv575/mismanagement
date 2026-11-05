@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { FactorEvidence, type ModelMeta } from "@/lib/factors-view";
 import { api } from "@/lib/api";
 import { TickerName } from "@/lib/ticker";
 import { fmtDate, fmtMultiple } from "@/lib/format";
@@ -56,8 +57,8 @@ interface Backtest {
   text_sample: number;
   untested: { key: string; why: string }[];
   scores: { score: number; n: number; deals: number }[];
-  sponsor: { rows: number; positives: number; base_rate: number } | null;
-  pe?: { rows: number; positives: number; base_rate: number } | null;
+  sponsor: ModelMeta | null;
+  pe?: ModelMeta | null;
 }
 
 // deal_class.buyer_type (classify-deals.ts) as shown on the page.
@@ -95,10 +96,26 @@ export async function DealsView({ searchParams, side }: { searchParams: Promise<
           <h2 id="model-h">How the AI-rollup model works</h2>
           <p className="muted page-lede">
             AI rollups are too new to learn from directly, so the model learns from their closest precedent: private-equity firms,
-            holdcos and insider groups buying services businesses. It reads each company&rsquo;s 10-K for recurring revenue, services
-            share, labor intensity and fit for an AI rollup, and weighs that with size and goodwill from past acquisitions. In
-            backtests on 2020&ndash;2024, companies it ranked in the top tenth were about 6.7× as likely as average to be bought this way.
+            holdcos and insider groups buying services businesses ({bt.sponsor.positives} such buyouts since 2019). It starts from the
+            take-private model&rsquo;s odds that a sponsor buys the company at all, then weights them by how much of the business is
+            services delivered by people, read from its 10-K.
+            {bt.sponsor.backtest && <> In backtests on {bt.sponsor.backtest.first}&ndash;{bt.sponsor.backtest.last}, scoring each year only from
+              filings made before it, companies it ranked in the top tenth were {bt.sponsor.backtest.top_decile.toFixed(1)}× as likely as average
+              to be bought this way{bt.sponsor.backtest.strict && <>, and {bt.sponsor.backtest.strict.top_decile.toFixed(1)}× for the
+              {" "}{bt.sponsor.backtest.strict.positives} buyouts of people-heavy firms like consultancies, revenue-cycle and IT-services companies</>}.</>}
           </p>
+          <Reader />
+        </section>
+      )}
+
+      {side === "angel" && bt.sponsor?.factors && (
+        <section className="backtest" id="factors" aria-labelledby="f-h">
+          <h2 id="f-h">What the 10-K says about who gets bought</h2>
+          <p className="muted page-lede">
+            Every company-year in the backtest, by what its 10-K said, and how often a sponsor bought it as a services business within the
+            next year. These are raw rates, not the model&rsquo;s weights: several overlap.
+          </p>
+          <FactorEvidence meta={bt.sponsor} outcome="bought" />
         </section>
       )}
 
@@ -127,9 +144,23 @@ export async function DealsView({ searchParams, side }: { searchParams: Promise<
           <p className="muted page-lede">
             The model learns from {bt.pe.positives} buyouts by private-equity firms, sponsor-backed platforms, holdcos and insider groups
             across {bt.pe.rows.toLocaleString("en-US")} company-years. It weighs size, goodwill from past acquisitions, activist 13D
-            stakes and what each 10-K says about the business. In backtests on 2020&ndash;2024, companies in its top tenth were about
-            3.8× as likely as average to be taken private.
+            stakes and what each 10-K says about the business: above all, contracted and recurring revenue, which buyers pay for, and
+            heavy regulation, which keeps them away.
+            {bt.pe.backtest && <> In backtests on {bt.pe.backtest.first}&ndash;{bt.pe.backtest.last}, scoring each year only from filings made
+              before it, companies in its top tenth were {bt.pe.backtest.top_decile.toFixed(1)}× as likely as average to be taken private.</>}
           </p>
+          <Reader />
+        </section>
+      )}
+
+      {side === "devil" && bt.pe?.factors && (
+        <section className="backtest" id="factors" aria-labelledby="f-h">
+          <h2 id="f-h">What the 10-K says about who gets taken private</h2>
+          <p className="muted page-lede">
+            Every company-year in the backtest, by what its 10-K said, and how often a private-equity firm, holdco or insider group
+            bought it within the next year. These are raw rates, not the model&rsquo;s weights: several overlap.
+          </p>
+          <FactorEvidence meta={bt.pe} outcome="bought" />
         </section>
       )}
 
@@ -240,6 +271,16 @@ export async function DealsView({ searchParams, side }: { searchParams: Promise<
       </div>
       </>}
     </main>
+  );
+}
+
+// Who reads the 10-Ks, in one line.
+function Reader() {
+  return (
+    <p className="muted reader-note">
+      Each 10-K&rsquo;s Business section is read by Jev, TypeSafe AI&rsquo;s decision model, which answers 40 typed questions about it
+      (services share, contracted revenue, ownership, restructuring and more) in one pass, for well under a cent per filing.
+    </p>
   );
 }
 
