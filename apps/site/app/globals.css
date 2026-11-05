@@ -1209,3 +1209,18 @@ h1 .tk-name {
 .factor-chips li[data-down="true"] { background: transparent; box-shadow: inset 0 0 0 1px var(--line-strong); color: var(--text-secondary); }
 .factor-chips .chip-lift { font-variant-numeric: tabular-nums; opacity: .7; margin-left: 2px; }
 @media (max-width: 560px) { .factor-table .lift-col { min-width: 120px; } .factor-table td:first-child { white-space: normal; } }
+
+/* Company page: the business bars and the past-deal patterns under them. */
+.biz-head, .patterns h3 { grid-column: 1 / -1; font-size: .875rem; font-weight: 600; margin: .75rem 0 0; }
+.biz-head .muted { font-weight: 400; }
+.verdict-wide { grid-column: 1 / -1; }
+.patterns { grid-column: 1 / -1; margin-top: .5rem; padding-top: .75rem; border-top: 1px solid var(--line-subtle); }
+.patterns > p { font-size: .8125rem; margin: .2rem 0 .6rem; }
+.pattern-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; }
+.pattern-col h4 { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 .35rem; color: var(--text-muted); }
+.pattern-col[data-up="true"] h4 { color: var(--hit-strong); }
+.pattern-col ul { list-style: none; margin: 0; padding: 0; }
+.pattern-col li { display: flex; justify-content: space-between; gap: 12px; font-size: .875rem; padding: 4px 0; border-bottom: 1px solid var(--line-subtle); cursor: help; }
+.pattern-lift { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pattern-col p { font-size: .8125rem; margin: 0; }
+@media (max-width: 560px) { .pattern-cols { grid-template-columns: 1fr; } }

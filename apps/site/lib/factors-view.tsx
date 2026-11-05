@@ -108,21 +108,30 @@ export function FactorChips({ factors, meta, side, exclude = [] }: { factors: Re
       chips.push({ key: f.name, label: LOW_LABEL[f.name] ?? `Low: ${f.label.toLowerCase()}`, lift: f.lift_low, tip: `Of ${n(f.n_low)} companies scoring low on "${f.label.toLowerCase()}", ${what} came ${f.lift_low.toFixed(1)}× as often as average` });
   }
   const strength = (c: Chip) => Math.abs(Math.log(Math.max(c.lift, 0.05)));
-  const ups = chips.filter((c) => c.lift > 1).sort((a, b) => strength(b) - strength(a)).slice(0, 4);
-  const downs = chips.filter((c) => c.lift < 1).sort((a, b) => strength(b) - strength(a)).slice(0, 4);
+  // Only the patterns strong enough to be worth a reader's attention.
+  const ups = chips.filter((c) => c.lift >= 2).sort((a, b) => strength(b) - strength(a)).slice(0, 3);
+  const downs = chips.filter((c) => c.lift <= 0.5).sort((a, b) => strength(b) - strength(a)).slice(0, 3);
   if (!ups.length && !downs.length) return null;
-  const row = (cs: Chip[], up: boolean, head: string) => cs.length > 0 && (
-    <div className="factor-chips">
-      <span className="muted">{head}</span>
-      <ul>
-        {cs.map((c) => (
-          <li key={c.key} data-up={up} data-down={!up} title={c.tip}>
-            <span aria-hidden="true">{up ? "↑" : "↓"}</span>{c.label}
-            <span className="chip-lift">{c.lift < 0.1 ? "<0.1" : c.lift.toFixed(1)}×</span>
-          </li>
-        ))}
-      </ul>
+  const col = (cs: Chip[], up: boolean, head: string) => (
+    <div className="pattern-col" data-up={up}>
+      <h4>{head}</h4>
+      {cs.length ? (
+        <ul>
+          {cs.map((c) => (
+            <li key={c.key} title={c.tip}>
+              <span>{c.label}</span>
+              <span className="pattern-lift">{c.lift < 0.1 ? "almost never" : up ? `${c.lift.toFixed(1)}× as often` : `${c.lift.toFixed(1)}× as often`}</span>
+            </li>
+          ))}
+        </ul>
+      ) : <p className="muted">Nothing notable.</p>}
     </div>
   );
-  return <>{row(ups, true, "In its favor:")}{row(downs, false, "Against it:")}</>;
+  return (
+    <div className="patterns">
+      <h3>Other things in the 10-K that mattered in past deals</h3>
+      <p className="muted">Not part of the score above. How often companies whose 10-K read the same way went on to {what}, compared with the average company.</p>
+      <div className="pattern-cols">{col(ups, true, "Pointing toward a deal")}{col(downs, false, "Pointing away")}</div>
+    </div>
+  );
 }

@@ -263,7 +263,7 @@ function Signals({ p, chips }: { p: Profile; chips?: React.ReactNode }) {
             <h2 id="pe-h">{bare(mult)} to be taken private</h2>
             <p className="muted">{pct != null && <>Top {topShare(pct)} of the Russell 3000 for a buyout by a private-equity firm, holdco or insiders. </>}<Link href="/pe/deals#model">How it works</Link></p>
           </div>
-          {chips}
+          {chips && <div className="verdict-wide">{chips}</div>}
         </div>
       )}
       <div className="signals-head">
@@ -339,13 +339,14 @@ function SignalGrid({ keys, scores, marketCap }: { keys: readonly string[]; scor
   );
 }
 
+// Roughly in order of how much they move the score.
 const BUSINESS_ROWS: [string, string][] = [
-  ["recurring_revenue", "Recurring revenue"],
-  ["rollup_fit", "AI-rollup fit"],
   ["services_share", "Services share"],
   ["labor_intensity", "Labor intensity"],
-  ["ai_automatable", "Work AI could do"],
+  ["recurring_revenue", "Recurring revenue"],
   ["fragmented_market", "Fragmented market"],
+  ["rollup_fit", "AI-rollup fit"],
+  ["ai_automatable", "Work AI could do"],
 ];
 
 // The verdict: how much likelier than average an AI rollup, holdco or PE firm
@@ -362,8 +363,8 @@ function SponsorOdds({ s, chips }: { s: Record<string, unknown>; chips?: React.R
         <p className="muted">{pct != null && <>Top {topShare(pct)} of the Russell 3000. </>}<Link href="/deals#model">How it works</Link></p>
       </div>
       {s.business_summary != null && <p className="verdict-summary">{String(s.business_summary)}</p>}
-      {chips}
-      {scores.length > 0 && (
+      {scores.length > 0 && <>
+        <h3 className="biz-head">What the score is built on <span className="muted">· read from the 10-K, out of 10</span></h3>
         <ul className="biz-bars" aria-label="What the 10-K says about the business, out of 10">
           {scores.map(([k, label]) => {
             const v = Number(s[k]);
@@ -376,7 +377,8 @@ function SponsorOdds({ s, chips }: { s: Record<string, unknown>; chips?: React.R
             );
           })}
         </ul>
-      )}
+      </>}
+      {chips}
     </section>
   );
 }
